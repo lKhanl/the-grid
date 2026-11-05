@@ -117,9 +117,6 @@ func Load(path string) (*Config, error) {
 		Path: abs,
 		Dir:  filepath.Dir(abs),
 	}
-	if cfg.Name == "" {
-		cfg.Name = filepath.Base(cfg.Dir)
-	}
 	if raw.EnvFile != "" {
 		cfg.EnvFile = resolvePath(cfg.Dir, raw.EnvFile)
 	}
