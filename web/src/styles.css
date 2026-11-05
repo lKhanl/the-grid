@@ -79,6 +79,14 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .dot-crashed { background: var(--red); border-color: var(--red); }
 .dot-exited { background: var(--muted); }
 @keyframes pulse { 50% { opacity: .35; } }
+.status-icon { display: inline-flex; flex: none; color: var(--muted); opacity: .7; }
+.status-icon .icon { stroke-width: 2.2; }
+.st-running { color: var(--green); opacity: 1; }
+.st-building { color: #c58af9; opacity: 1; animation: pulse 1s infinite; }
+.st-starting { color: var(--yellow); opacity: 1; animation: pulse 1s infinite; }
+.st-stopping { color: var(--orange); opacity: 1; animation: pulse 1s infinite; }
+.st-crashed { color: var(--red); opacity: 1; }
+.st-exited { color: var(--muted); opacity: 1; }
 
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: none; border: 1px solid transparent; color: var(--text); border-radius: 5px; height: 28px; min-width: 28px; padding: 0 6px; cursor: pointer; font: inherit; font-size: 14px; line-height: 1; }
 .btn .icon { flex: none; }
@@ -371,6 +379,7 @@ details.form-section[open] summary { margin-bottom: 10px; }
 [data-theme='basic'] .type-card .detected { background: var(--on); color: var(--text); }
 [data-theme='basic'] .preview-tag.build, [data-theme='basic'] .preview-tag.run { background: var(--chip); color: var(--muted); }
 [data-theme='basic'] .dot-building { background: var(--muted); border-color: var(--muted); }
+[data-theme='basic'] .st-building { color: var(--muted); }
 [data-theme='basic'] .badge-building { background: var(--chip); color: var(--muted); }
 [data-theme='basic'] ::selection { background: rgba(91,127,199,.35); }
 

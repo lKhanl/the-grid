@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { act, deleteService, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State } from './api'
 import { LogView } from './LogView'
-import { ChevronIcon, ClearIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon } from './icons'
+import { ChevronIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon } from './icons'
 import { ServiceForm } from './ServiceForm'
 import { RuntimeForm } from './RuntimeForm'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
@@ -34,8 +34,16 @@ function useTick(ms: number) {
   }, [ms])
 }
 
-function Dot({ status }: { status: Info['status'] }) {
-  return <span className={`dot dot-${status}`} title={status} />
+const TYPE_ICONS = { 'spring-boot': SpringIcon, node: NodeIcon, script: ScriptIcon, custom: CodeIcon } as const
+
+/** Service type icon, colored by status. */
+function StatusIcon({ status, type, size = 16 }: { status: Info['status']; type: Info['type']; size?: number }) {
+  const I = TYPE_ICONS[type] ?? CodeIcon
+  return (
+    <span className={`status-icon st-${status}`} title={`${type} · ${status}`}>
+      <I size={size} />
+    </span>
+  )
 }
 
 function Btn(props: { icon: ReactNode; label?: string; title: string; onClick: () => void; disabled?: boolean; kind?: string }) {
@@ -424,7 +432,7 @@ export default function App() {
                     }}
                     title={s.description || s.command}
                   >
-                    <Dot status={s.status} />
+                    <StatusIcon status={s.status} type={s.type} />
                     <span className="name">{s.name}</span>
                     {unread[s.name] && <span className={`unread unread-${unread[s.name]}`} />}
                     <span className="meta">
@@ -563,7 +571,7 @@ export default function App() {
         <section className="detail">
           {current ? (
             <div className="toolbar">
-              <Dot status={current.status} />
+              <StatusIcon status={current.status} type={current.type} size={18} />
               <span className="title">{current.name}</span>
               <span className={`badge badge-${current.status}`}>{statusLabel(current)}</span>
               {current.pid ? <span className="muted">pid {current.pid}</span> : null}
