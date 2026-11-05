@@ -606,9 +606,6 @@ func ReadRuntime(path, name string) (RuntimeSpec, error) {
 		return RuntimeSpec{}, err
 	}
 	typ := strings.ToLower(r.Type)
-	if a, ok := typeAliases[typ]; ok {
-		typ = a
-	}
 	if typ == "" {
 		typ = inferType(name)
 	}
@@ -851,4 +848,33 @@ func PreviewSpec(dir string, s ServiceSpec) (build, run string, err error) {
 	}
 	build, run = svc.Preview()
 	return build, run, nil
+}
+
+// ReorderServices rewrites the order of the services mapping. names must list
+// every service exactly once. Comments travel with their service.
+func ReorderServices(path string, names []string) error {
+	editMu.Lock()
+	defer editMu.Unlock()
+	doc, svcs, err := loadDoc(path)
+	if err != nil {
+		return err
+	}
+	if len(names)*2 != len(svcs.Content) {
+		return fmt.Errorf("order must list all %d services", len(svcs.Content)/2)
+	}
+	pairs := map[string][2]*yaml.Node{}
+	for i := 0; i+1 < len(svcs.Content); i += 2 {
+		pairs[svcs.Content[i].Value] = [2]*yaml.Node{svcs.Content[i], svcs.Content[i+1]}
+	}
+	out := make([]*yaml.Node, 0, len(svcs.Content))
+	for _, n := range names {
+		p, ok := pairs[n]
+		if !ok {
+			return fmt.Errorf("unknown or repeated service %q", n)
+		}
+		delete(pairs, n)
+		out = append(out, p[0], p[1])
+	}
+	svcs.Content = out
+	return writeValidated(path, doc)
 }

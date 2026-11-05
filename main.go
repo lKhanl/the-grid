@@ -91,27 +91,15 @@ func main() {
 }
 
 func envPort() int {
-	for _, k := range []string{"GRID_PORT", "PROJECT_RUNNER_PORT"} { // old name still works
-		if p, err := strconv.Atoi(os.Getenv(k)); err == nil && p > 0 {
-			return p
-		}
+	if p, err := strconv.Atoi(os.Getenv("GRID_PORT")); err == nil && p > 0 {
+		return p
 	}
 	return defaultPort
 }
 
-// defaultConfig is grid.yaml, or runner.yaml from before the rename.
-func defaultConfig() string {
-	if _, err := os.Stat("grid.yaml"); err != nil {
-		if _, err := os.Stat("runner.yaml"); err == nil {
-			return "runner.yaml"
-		}
-	}
-	return "grid.yaml"
-}
-
 func serve(args []string) error {
 	fset := flag.NewFlagSet("serve", flag.ExitOnError)
-	cfgPath := fset.String("c", defaultConfig(), "config file")
+	cfgPath := fset.String("c", "grid.yaml", "config file")
 	port := fset.Int("p", envPort(), "HTTP port (listens on 127.0.0.1 only)")
 	noBrowser := fset.Bool("no-browser", false, "do not open the browser")
 	fset.Parse(args)
@@ -349,7 +337,7 @@ func logs(args []string) error {
 // runtimes checks every configured runtime and prints its real version.
 func runtimes(args []string) error {
 	fset := flag.NewFlagSet("runtimes", flag.ExitOnError)
-	cfgPath := fset.String("c", defaultConfig(), "config file")
+	cfgPath := fset.String("c", "grid.yaml", "config file")
 	fset.Parse(args)
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {

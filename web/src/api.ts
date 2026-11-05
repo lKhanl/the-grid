@@ -326,3 +326,8 @@ export async function previewSpec(spec: ServiceSpec): Promise<{ build: string; r
   const r = await check(await fetch('/api/preview', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(spec) }))
   return r.json()
 }
+
+/** Persist a new service order (every service, once). */
+export async function reorderServices(names: string[]) {
+  await check(await fetch('/api/config/order', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ services: names }) }))
+}

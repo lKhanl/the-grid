@@ -84,8 +84,7 @@ grid runtimes              # check every runtime path and print its real version
 ```
 
 For the fans: `grid programs` = status, `grid rez <x>` = start, `grid derezz <x>` = stop,
-`grid eol` ("end of line") stops everything. `GRID_PORT` overrides the port. An old
-`runner.yaml` is still picked up when there is no `grid.yaml`.
+`grid eol` ("end of line") stops everything. `GRID_PORT` overrides the port.
 
 ## Config
 
@@ -135,8 +134,7 @@ bin dir is put first on PATH. There are three types:
 | `script` | any tool folder (Maven, Gradle, Python, own scripts): its `bin` (or the folder itself) goes first on PATH |
 
 The type is inferred from the name (`java-*`, `jdk*`, `jre*` → java, `node*` → node,
-anything else → script) or set with `type:`. Older configs with `maven`, `gradle` or
-`generic` are read as `script`. A service may use at most one java and one node runtime
+anything else → script) or set with `type:`. A service may use at most one java and one node runtime
 but any number of script runtimes. A runtime may carry its own `env` (e.g. `MAVEN_OPTS`).
 `grid runtimes` checks every path and prints the real version; a missing path
 makes the service fail with a clear message.

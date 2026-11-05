@@ -29,7 +29,7 @@ type Config struct {
 // services can opt into instead of whatever is on the system PATH.
 type Runtime struct {
 	Name string            `yaml:"-"`
-	Type string            `yaml:"type"` // java | maven | node | gradle | generic (inferred from the name)
+	Type string            `yaml:"type"` // java | node | script (inferred from the name)
 	Home string            `yaml:"home"`
 	Bin  string            `yaml:"bin"` // optional, defaults per type
 	Env  map[string]string `yaml:"env"`

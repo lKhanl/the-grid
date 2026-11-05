@@ -28,12 +28,6 @@ var runtimeTypes = map[string]struct {
 // RuntimeTypes lists the types in display order.
 var RuntimeTypes = []string{"java", "node", "script"}
 
-// typeAliases keeps older configs working.
-var typeAliases = map[string]string{
-	"generic": "script", "maven": "script", "mvn": "script", "gradle": "script", "tool": "script", "shell": "script",
-	"jdk": "java", "nodejs": "node",
-}
-
 // inferType guesses the type from names like java-17, jdk11, node20.
 func inferType(name string) string {
 	n := strings.ToLower(name)
@@ -53,9 +47,6 @@ func normalizeRuntime(dir string, rt *Runtime) error {
 	}
 	rt.Home = resolvePath(dir, rt.Home)
 	rt.Type = strings.ToLower(strings.TrimSpace(rt.Type))
-	if a, ok := typeAliases[rt.Type]; ok {
-		rt.Type = a
-	}
 	if rt.Type == "" {
 		rt.Type = inferType(rt.Name)
 	}

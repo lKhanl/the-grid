@@ -1,11 +1,12 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { act, deleteService, fetchLogs, reload, LogStore, type Action, type Info, type RunnerEvent, type State } from './api'
+import { act, deleteService, fetchLogs, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State } from './api'
 import { LogView } from './LogView'
-import { ClearIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon } from './icons'
+import { ChevronIcon, ClearIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon } from './icons'
 import { ServiceForm } from './ServiceForm'
 import { RuntimeForm } from './RuntimeForm'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
 import { NeonBorder } from './NeonBorder'
+import { applyTheme, loadTheme, type Theme } from './theme'
 
 const ACTIVE = new Set(['starting', 'building', 'running', 'stopping'])
 const BUILDS = new Set(['spring-boot', 'node'])
@@ -57,7 +58,7 @@ function Btn(props: { icon: ReactNode; label?: string; title: string; onClick: (
 export default function App() {
   const store = useMemo(() => new LogStore(), [])
   const [state, setState] = useState<State | null>(null)
-  const [selected, setSelected] = useState<string | null>(() => localStorage.getItem('pr.selected'))
+  const [selected, setSelected] = useState<string | null>(() => localStorage.getItem('grid.selected'))
   const [filter, setFilter] = useState('')
   const [connected, setConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -66,19 +67,42 @@ export default function App() {
   const [rtForm, setRtForm] = useState<{ editing: string | null } | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; service: string } | null>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
-  const [neon, setNeon] = useState(() => localStorage.getItem('pr.neon') !== 'off')
-  const [panel, setPanel] = useState<'services' | 'runtimes'>(() =>
-    localStorage.getItem('pr.panel') === 'runtimes' ? 'runtimes' : 'services',
+  // drag & drop reordering inside a group
+  const [drag, setDrag] = useState<{ name: string; group: string } | null>(null)
+  const [dropAt, setDropAt] = useState<{ name: string; after: boolean } | null>(null)
+  const [dragGroup, setDragGroup] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('grid.collapsed') ?? '[]'))
+    } catch {
+      return new Set()
+    }
+  })
+  const toggleGroup = (g: string) =>
+    setCollapsed((c) => {
+      const n = new Set(c)
+      if (!n.delete(g)) n.add(g)
+      localStorage.setItem('grid.collapsed', JSON.stringify([...n]))
+      return n
+    })
+  const [groupDropAt, setGroupDropAt] = useState<{ group: string; after: boolean } | null>(null)
+  const [neon, setNeon] = useState(() => localStorage.getItem('grid.neon') !== 'off')
+  const [theme, setTheme] = useState<Theme>(loadTheme)
+  const [panel, setPanel] = useState<'services' | 'runtimes' | 'settings'>(() => {
+    const p = localStorage.getItem('grid.panel')
+    return p === 'runtimes' || p === 'settings' ? p : 'services'
+  }
   )
   const filterRef = useRef<HTMLInputElement>(null)
   const selectedRef = useRef(selected)
   selectedRef.current = selected
 
   useEffect(() => {
-    if (selected) localStorage.setItem('pr.selected', selected)
+    if (selected) localStorage.setItem('grid.selected', selected)
   }, [selected])
-  useEffect(() => localStorage.setItem('pr.panel', panel), [panel])
-  useEffect(() => localStorage.setItem('pr.neon', neon ? 'on' : 'off'), [neon])
+  useEffect(() => localStorage.setItem('grid.panel', panel), [panel])
+  useEffect(() => localStorage.setItem('grid.neon', neon ? 'on' : 'off'), [neon])
+  useEffect(() => applyTheme(theme), [theme])
 
   // Deep links: #new, #new=group, #edit=service, #runtime=new, #runtime=name
   useEffect(() => {
@@ -87,7 +111,8 @@ export default function App() {
       if (h === 'new' || h.startsWith('new=')) setForm({ editing: null, group: h.slice(4) || undefined })
       else if (h.startsWith('new-dir=')) setForm({ editing: null, cwd: h.slice(8) })
       else if (h.startsWith('edit=')) setForm({ editing: h.slice(5) })
-      else if (h === 'runtimes' || h === 'services') setPanel(h)
+      else if (h === 'runtimes' || h === 'services' || h === 'settings') setPanel(h)
+      else if (h === 'theme=basic' || h === 'theme=grid') setTheme(h.slice(6) as Theme)
       else if (h.startsWith('runtime=')) setRtForm({ editing: h.slice(8) === 'new' ? null : h.slice(8) })
       if (h) history.replaceState(null, '', location.pathname)
     }
@@ -154,7 +179,44 @@ export default function App() {
     }
     return [...m.entries()]
   }, [services])
-  const ordered = useMemo(() => groups.flatMap(([, list]) => list), [groups])
+  // ↑/↓ walk only the services that are visible (collapsed groups are skipped)
+  const ordered = useMemo(() => groups.flatMap(([g, list]) => (collapsed.has(g) ? [] : list)), [groups, collapsed])
+
+  function saveOrder(next: string[]) {
+    if (!state || next.every((n, i) => n === state.services[i]?.name)) return
+    // show it right away; the server confirms with a snapshot
+    setState((st) => st && { ...st, services: next.map((n) => st.services.find((s) => s.name === n)!) })
+    reorderServices(next).catch((e) => setError(`reorder: ${e.message}`))
+  }
+
+  /** Move a whole group before/after another one; services keep their group. */
+  function moveGroup(name: string, target: string, after: boolean) {
+    if (name === target) return
+    const order = groups.map(([g]) => g).filter((g) => g !== name)
+    order.splice(order.indexOf(target) + (after ? 1 : 0), 0, name)
+    saveOrder(order.flatMap((g) => groups.find(([x]) => x === g)![1].map((s) => s.name)))
+  }
+
+  const endDrag = () => {
+    setDrag(null)
+    setDropAt(null)
+    setDragGroup(null)
+    setGroupDropAt(null)
+  }
+
+  /** Move `name` before/after `target` (same group) and save the order. */
+  function moveService(name: string, target: string, after: boolean) {
+    if (!state || name === target) return
+    const all = state.services.map((s) => s.name)
+    const group = state.services.find((s) => s.name === name)?.group ?? ''
+    const slots = state.services.flatMap((s, i) => ((s.group ?? '') === group ? [i] : []))
+    const members = slots.map((i) => all[i]).filter((n) => n !== name)
+    const at = members.indexOf(target) + (after ? 1 : 0)
+    members.splice(at, 0, name)
+    const next = [...all]
+    slots.forEach((i, k) => (next[i] = members[k]))
+    saveOrder(next)
+  }
   const current = services.find((s) => s.name === selected) ?? null
 
   // Keyboard: ↑/↓ select, s start/stop, r restart, c clear, / filter, Esc clears filter.
@@ -204,9 +266,9 @@ export default function App() {
 
   return (
     <div className="app">
-      {neon && <NeonBorder />}
+      {neon && theme === 'grid' && <NeonBorder />}
       <header className="topbar">
-        <div className="brand" onClick={() => setNeon((v) => !v)} title={neon ? 'Turn the light line off' : 'Turn the light line on'}>
+        <div className="brand">
           <span className="logo">
             <GridIcon size={22} />
           </span>
@@ -253,19 +315,68 @@ export default function App() {
             <span className="activity-tip">Runtimes</span>
             {state?.runtimes.some((r) => r.error) && <span className="activity-badge warn">!</span>}
           </button>
+          <div className="activity-spacer" />
+          <button
+            className={`activity ${panel === 'settings' ? 'on' : ''}`}
+            aria-label="Settings"
+            onClick={() => setPanel('settings')}
+          >
+            <SettingsIcon size={21} />
+            <span className="activity-tip">Settings</span>
+          </button>
         </nav>
         <aside className="sidebar">
           {panel === 'services' ? (
             <>
-          <div className="sidebar-head">
+          <div className="sidebar-head divided">
             <span>Services</span>
             <Btn icon={<PlusIcon size={14} />} label="New" title="New service (N)" kind="text small" onClick={() => setForm({ editing: null })} />
           </div>
           {groups.map(([group, list]) => (
-            <div key={group} className="group">
+            <div
+              key={group}
+              className={`group ${dragGroup === group ? 'dragging' : ''} ${
+                groupDropAt?.group === group && dragGroup !== group ? (groupDropAt.after ? 'drop-after' : 'drop-before') : ''
+              }`}
+              onDragOver={(e) => {
+                if (dragGroup === null) return // a service is being dragged: rows handle it
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+                const r = e.currentTarget.getBoundingClientRect()
+                const after = e.clientY > r.top + r.height / 2
+                if (groupDropAt?.group !== group || groupDropAt.after !== after) setGroupDropAt({ group, after })
+              }}
+              onDrop={(e) => {
+                if (dragGroup === null) return
+                e.preventDefault()
+                if (groupDropAt) moveGroup(dragGroup, groupDropAt.group, groupDropAt.after)
+                endDrag()
+              }}
+            >
               {group && (
-                <div className="group-head">
+                <div
+                  className="group-head"
+                  draggable
+                  title="Click to collapse or expand, drag to reorder"
+                  onClick={() => toggleGroup(group)}
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = 'move'
+                    e.dataTransfer.setData('text/plain', 'group:' + group)
+                    setDragGroup(group)
+                  }}
+                  onDragEnd={endDrag}
+                >
+                  <span className={`group-chevron ${collapsed.has(group) ? '' : 'open'}`}>
+                    <ChevronIcon size={13} />
+                  </span>
                   <span className="group-name">{group}</span>
+                  {collapsed.has(group) && (
+                    <span className="group-count">
+                      {list.some((s) => ACTIVE.has(s.status)) && <span className="dot dot-running" />}
+                      {list.filter((s) => s.status === 'running').length}/{list.length}
+                      {list.some((s) => s.status === 'crashed') && <span className="group-crashed">!</span>}
+                    </span>
+                  )}
                   <span className="row-actions">
                     <Btn icon={<PlusIcon size={14} />} title={`New service in ${group}`} onClick={() => setForm({ editing: null, group })} />
                     <Btn icon={<PlayIcon size={14} />} title={`Start ${group}`} onClick={() => run(group, 'start')} kind="green" />
@@ -273,14 +384,38 @@ export default function App() {
                   </span>
                 </div>
               )}
-              {list.map((s) => {
+              {!(group && collapsed.has(group)) && list.map((s) => {
                 const active = ACTIVE.has(s.status)
                 return (
                   <div
                     key={s.name}
-                    className={`row ${s.name === selected ? 'selected' : ''} ${group ? 'indent' : ''}`}
+                    className={`row ${s.name === selected ? 'selected' : ''} ${group ? 'indent' : ''} ${drag?.name === s.name ? 'dragging' : ''} ${
+                      dropAt?.name === s.name && drag?.name !== s.name ? (dropAt.after ? 'drop-after' : 'drop-before') : ''
+                    }`}
                     onClick={() => setSelected(s.name)}
                     onDoubleClick={() => run(s.name, active ? 'restart' : 'start')}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = 'move'
+                      e.dataTransfer.setData('text/plain', s.name)
+                      setDrag({ name: s.name, group })
+                    }}
+                    onDragOver={(e) => {
+                      if (!drag || drag.group !== group) return // only within the same group
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                      const r = e.currentTarget.getBoundingClientRect()
+                      const after = e.clientY > r.top + r.height / 2
+                      if (dropAt?.name !== s.name || dropAt.after !== after) setDropAt({ name: s.name, after })
+                    }}
+                    onDrop={(e) => {
+                      if (!drag) return // a group is being dragged: let the group handle it
+                      e.preventDefault()
+                      e.stopPropagation()
+                      if (dropAt) moveService(drag.name, dropAt.name, dropAt.after)
+                      endDrag()
+                    }}
+                    onDragEnd={endDrag}
                     onContextMenu={(e) => {
                       e.preventDefault()
                       setSelected(s.name)
@@ -345,6 +480,51 @@ export default function App() {
             ))}
           </div>
             </>
+          ) : panel === 'settings' ? (
+            <>
+              <div className="sidebar-head divided">
+                <span>Settings</span>
+              </div>
+              <div className="settings">
+                <section>
+                  <h4>Theme</h4>
+                  <div className="theme-cards">
+                    {(
+                      [
+                        ['grid', 'The Grid', 'Cyan light lines on black, neon.'],
+                        ['basic', 'Basic', 'Calm neutral greys, no glow.'],
+                      ] as [Theme, string, string][]
+                    ).map(([id, label, help]) => (
+                      <button key={id} className={`theme-card ${theme === id ? 'on' : ''}`} onClick={() => setTheme(id)}>
+                        <span className={`swatch swatch-${id}`}>
+                          <i />
+                          <i />
+                          <i />
+                        </span>
+                        <strong>{label}</strong>
+                        <small>{help}</small>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <section>
+                  <h4>Effects</h4>
+                  <div
+                    className={`setting-row ${theme !== 'grid' ? 'disabled' : ''}`}
+                    role="switch"
+                    aria-checked={neon}
+                    onClick={() => theme === 'grid' && setNeon((v) => !v)}
+                  >
+                    <span className="setting-text">
+                      <span>Neon line around the window</span>
+                      <small>{theme === 'grid' ? 'A light cycle running along the edges.' : 'Only in The Grid theme.'}</small>
+                    </span>
+                    <span className={`switch ${neon && theme === 'grid' ? 'on' : ''}`} />
+                  </div>
+                </section>
+                <div className="settings-foot">Saved in this browser.</div>
+              </div>
+            </>
           ) : (
             <>
               <div className="sidebar-head divided">
@@ -376,10 +556,6 @@ export default function App() {
                   <Btn icon={<PlusIcon size={14} />} label="Add a runtime" title="New runtime" kind="text" onClick={() => setRtForm({ editing: null })} />
                 </div>
               )}
-              <div className="panel-note muted small">
-                Services without a runtime use java, mvn and node from the system PATH. A service can pick one java, one node and any number of
-                script runtimes.
-              </div>
             </>
           )}
         </aside>
@@ -458,7 +634,7 @@ export default function App() {
               {current.ready ? <span className="muted"> · ready on {current.ready}</span> : null}
             </div>
           )}
-          <LogView service={selected} store={store} filter={filter} />
+          <LogView service={selected} store={store} filter={filter} theme={theme} />
         </section>
       </div>
       {form && state && (

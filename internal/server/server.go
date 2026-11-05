@@ -55,7 +55,7 @@ func New(m *runner.Manager, ui fs.FS) http.Handler {
 				line = runner.StripANSI(line)
 			}
 			if e.Stream == "sys" {
-				line = "[runner] " + line
+				line = "[grid] " + line
 			}
 			b.WriteString(line)
 			b.WriteByte('\n')
@@ -122,6 +122,24 @@ func New(m *runner.Manager, ui fs.FS) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, m.State())
+	})
+	mux.HandleFunc("PUT /api/config/order", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Services []string `json:"services"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "bad JSON: "+err.Error())
+			return
+		}
+		if err := config.ReorderServices(m.ConfigPath(), body.Services); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := m.Reload(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	})
 	// --- runtimes ---
 	mux.HandleFunc("GET /api/config/runtimes/{name}", func(w http.ResponseWriter, r *http.Request) {

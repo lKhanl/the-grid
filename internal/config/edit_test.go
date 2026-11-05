@@ -241,7 +241,7 @@ func TestRuntimeCRUD(t *testing.T) {
 	}
 }
 
-func TestRuntimeAliasesAndNewSection(t *testing.T) {
+func TestRuntimeTypesAndNewSection(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "grid.yaml")
 	os.WriteFile(p, []byte("services:\n  a:\n    command: echo hi\n"), 0o644)
 	if err := SaveRuntime(p, "", RuntimeSpec{Name: "java-11", Type: "java", Home: "/tmp"}); err != nil {
@@ -251,13 +251,15 @@ func TestRuntimeAliasesAndNewSection(t *testing.T) {
 	if strings.Index(out, "runtimes:") > strings.Index(out, "services:") {
 		t.Fatalf("runtimes should come before services:\n%s", out)
 	}
-	os.WriteFile(p, []byte("runtimes:\n  mvn: {home: /tmp, type: maven}\n  g: {home: /tmp, type: generic}\nservices: {}\n"), 0o644)
+	// only java, node and script exist; a maven-3.9 name is inferred as script
+	os.WriteFile(p, []byte("runtimes:\n  maven-3.9: {home: /tmp}\nservices: {}\n"), 0o644)
 	cfg, err := Load(p)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || cfg.Runtimes["maven-3.9"].Type != "script" {
+		t.Fatalf("inferred type: %v", err)
 	}
-	if cfg.Runtimes["mvn"].Type != "script" || cfg.Runtimes["g"].Type != "script" {
-		t.Fatal("aliases not mapped to script")
+	os.WriteFile(p, []byte("runtimes:\n  m: {home: /tmp, type: maven}\nservices: {}\n"), 0o644)
+	if _, err := Load(p); err == nil {
+		t.Fatal("type: maven should be rejected")
 	}
 }
 
@@ -287,5 +289,29 @@ func TestTypedServiceRoundTrip(t *testing.T) {
 	// node needs a script
 	if err := SaveService(p, "", ServiceSpec{Name: "n", Type: TypeNode, Node: &NodeSpec{}}); err == nil {
 		t.Fatal("expected node.script error")
+	}
+}
+
+func TestReorderServices(t *testing.T) {
+	p := setup(t)
+	if err := ReorderServices(p, []string{"ui", "api"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Services[0].Name != "ui" || cfg.Services[1].Name != "api" {
+		t.Fatalf("order %s, %s", cfg.Services[0].Name, cfg.Services[1].Name)
+	}
+	out := read(t, p)
+	// the comment above api moves with it
+	if strings.Index(out, "# the main API") < strings.Index(out, "ui:") || !strings.Contains(out, "# keep this comment") {
+		t.Fatalf("comments lost or misplaced:\n%s", out)
+	}
+	for _, bad := range [][]string{{"ui"}, {"ui", "ui"}, {"ui", "nope"}} {
+		if err := ReorderServices(p, bad); err == nil {
+			t.Errorf("expected error for %v", bad)
+		}
 	}
 }

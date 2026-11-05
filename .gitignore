@@ -11,5 +11,3 @@ grid.yaml.bak
 target/
 demo/**/node_modules/
 demo/web-ui/package-lock.json
-runner.yaml
-runner.yaml.bak
