@@ -5,6 +5,7 @@ import { ClearIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, 
 import { ServiceForm } from './ServiceForm'
 import { RuntimeForm } from './RuntimeForm'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
+import { NeonBorder } from './NeonBorder'
 
 const ACTIVE = new Set(['starting', 'building', 'running', 'stopping'])
 const BUILDS = new Set(['spring-boot', 'node'])
@@ -65,6 +66,7 @@ export default function App() {
   const [rtForm, setRtForm] = useState<{ editing: string | null } | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; service: string } | null>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
+  const [neon, setNeon] = useState(() => localStorage.getItem('pr.neon') !== 'off')
   const [panel, setPanel] = useState<'services' | 'runtimes'>(() =>
     localStorage.getItem('pr.panel') === 'runtimes' ? 'runtimes' : 'services',
   )
@@ -76,6 +78,7 @@ export default function App() {
     if (selected) localStorage.setItem('pr.selected', selected)
   }, [selected])
   useEffect(() => localStorage.setItem('pr.panel', panel), [panel])
+  useEffect(() => localStorage.setItem('pr.neon', neon ? 'on' : 'off'), [neon])
 
   // Deep links: #new, #new=group, #edit=service, #runtime=new, #runtime=name
   useEffect(() => {
@@ -201,8 +204,9 @@ export default function App() {
 
   return (
     <div className="app">
+      {neon && <NeonBorder />}
       <header className="topbar">
-        <div className="brand">
+        <div className="brand" onClick={() => setNeon((v) => !v)} title={neon ? 'Turn the light line off' : 'Turn the light line on'}>
           <span className="logo">
             <GridIcon size={22} />
           </span>
