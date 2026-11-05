@@ -9,6 +9,9 @@ type Event struct {
 	Entry   *Entry `json:"entry,omitempty"`
 	Info    *Info  `json:"info,omitempty"`
 	State   *State `json:"state,omitempty"`
+	// Logs is only sent in the first snapshot of a connection: the log
+	// history of every service, so the UI needs no extra requests.
+	Logs map[string][]Entry `json:"logs,omitempty"`
 }
 
 // Hub fans events out to subscribers. Slow subscribers are dropped

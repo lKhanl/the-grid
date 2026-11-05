@@ -254,8 +254,15 @@ func events(m *runner.Manager, w http.ResponseWriter, r *http.Request) {
 	ch := m.Hub.Subscribe() // subscribe before the snapshot so nothing is missed
 	defer m.Hub.Unsubscribe(ch)
 
+	// The first snapshot carries every service's log history: one stream
+	// instead of one request per service (browsers allow only 6 connections
+	// per host, shared by all tabs, and each tab already holds this stream).
 	st := m.State()
-	writeEvent(w, runner.Event{Type: "snapshot", State: &st})
+	logs := map[string][]runner.Entry{}
+	for _, s := range m.Services() {
+		logs[s.Name()] = s.Logs(10000)
+	}
+	writeEvent(w, runner.Event{Type: "snapshot", State: &st, Logs: logs})
 	fl.Flush()
 
 	ping := time.NewTicker(15 * time.Second)

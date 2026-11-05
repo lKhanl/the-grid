@@ -50,6 +50,8 @@ export interface RunnerEvent {
   entry?: Entry
   info?: Info
   state?: State
+  /** log history per service; only in the first snapshot of a connection */
+  logs?: Record<string, Entry[]>
 }
 
 export type Action = 'start' | 'stop' | 'restart' | 'clear' | 'start-nobuild'
@@ -113,6 +115,12 @@ export class LogStore {
     buf.push(e)
     if (buf.length > MAX_LINES * 1.25) buf.splice(0, buf.length - MAX_LINES)
     this.emit(service, [e], false)
+  }
+
+  /** Set the whole buffer (log history from a fresh connection). */
+  set(service: string, entries: Entry[]) {
+    this.buffers.set(service, entries.slice(-MAX_LINES))
+    this.emit(service, this.get(service), true)
   }
 
   /** Replace with a backlog, keeping live lines that arrived after it. */

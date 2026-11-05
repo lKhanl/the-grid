@@ -8,6 +8,19 @@ like IntelliJ's **Services** tool window, without the IDE.
 Built for the AI-agent era: the code is written by Claude/Codex in a terminal, you just
 need 3–4 APIs, UIs and scripts running side by side with their logs one click away.
 
+![The Grid: services grouped on the left, live build and run logs on the right](docs/main.png)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/form.png" alt="New service: the folder is detected as a Spring Boot project"></td>
+    <td width="50%"><img src="docs/basic.png" alt="Basic theme"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>New service — Spring Boot detected from the folder</sub></td>
+    <td align="center"><sub>Basic theme (Settings)</sub></td>
+  </tr>
+</table>
+
 - One self-contained binary (UI embedded), no install, no admin rights
 - Groups, start/stop/restart per service, group or all
 - Spring Boot (Maven), Node and script services are detected from the folder; every start

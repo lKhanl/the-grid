@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { act, deleteService, fetchLogs, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State } from './api'
+import { act, deleteService, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State } from './api'
 import { LogView } from './LogView'
 import { ChevronIcon, ClearIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon } from './icons'
 import { ServiceForm } from './ServiceForm'
@@ -104,7 +104,7 @@ export default function App() {
   useEffect(() => localStorage.setItem('grid.neon', neon ? 'on' : 'off'), [neon])
   useEffect(() => applyTheme(theme), [theme])
 
-  // Deep links: #new, #new=group, #edit=service, #runtime=new, #runtime=name
+  // Deep links: #new, #new=group, #edit=service, #select=service, #runtime=new, #runtime=name
   useEffect(() => {
     const open = () => {
       const h = decodeURIComponent(location.hash.slice(1))
@@ -113,6 +113,7 @@ export default function App() {
       else if (h.startsWith('edit=')) setForm({ editing: h.slice(5) })
       else if (h === 'runtimes' || h === 'services' || h === 'settings') setPanel(h)
       else if (h === 'theme=basic' || h === 'theme=grid') setTheme(h.slice(6) as Theme)
+      else if (h.startsWith('select=')) setSelected(h.slice(7))
       else if (h.startsWith('runtime=')) setRtForm({ editing: h.slice(8) === 'new' ? null : h.slice(8) })
       if (h) history.replaceState(null, '', location.pathname)
     }
@@ -132,10 +133,10 @@ export default function App() {
         const st = ev.state
         setState(st)
         setSelected((cur) => (cur && st.services.some((s) => s.name === cur) ? cur : (st.services[0]?.name ?? null)))
-        for (const s of st.services) {
-          store.clear(s.name)
-          fetchLogs(s.name).then((b) => store.replace(s.name, b), () => {})
-        }
+        // The first snapshot of a connection carries the log history; later
+        // ones (after a config change) don't, and the buffers stay as they are.
+        // (set, not merge: after a server restart line numbers start again)
+        if (ev.logs) for (const s of st.services) store.set(s.name, ev.logs[s.name] ?? [])
       } else if (ev.type === 'service' && ev.info) {
         const info = ev.info
         setState((st) => st && { ...st, services: st.services.map((s) => (s.name === info.name ? info : s)) })
