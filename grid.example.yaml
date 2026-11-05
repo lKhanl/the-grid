@@ -1,0 +1,121 @@
+# The Grid config. Copy to grid.yaml (git-ignored) and edit.
+# Paths are relative to this file. Env values may use ${OTHER_VAR}.
+name: Demo workspace
+
+env:                       # applied to every service
+  PROFILE: local
+
+# Runtimes: named installations (can also be added in the UI). A service
+# without `runtime:` uses java/mvn/node from the system PATH. With `runtime:`
+# the bin dir goes first on PATH (java also sets JAVA_HOME).
+# Types: java, node, script (any tool folder: Maven, Gradle, scripts).
+# Inferred from the name (java-*/jdk* -> java, node* -> node, else script)
+# or set with `type:`. Check them with: grid runtimes
+#
+# runtimes:
+#   java-11:    { home: "C:/Program Files/Java/jdk-11.0.24" }
+#   java-17:    { home: "C:/Program Files/Java/jdk-17.0.21.0.2" }
+#   maven-3.9:  { home: "C:/Program Files/JetBrains/IntelliJ IDEA 2025.3.3/plugins/maven/lib/maven3" }
+#   node-20:    { home: "C:/tools/node-v20.18.0-win-x64" }   # node.exe in the root is fine
+#   node-24:    { home: "C:/Program Files/nodejs" }
+#   tools:      { type: script, home: "C:/tools", env: { MAVEN_OPTS: "-Xmx1g" } }
+
+services:
+  api:
+    group: backend
+    description: Demo REST API (node), stands in for a Spring Boot app
+    command: node demo/api.js
+    env: { PORT: "8081", SERVICE_NAME: api }
+    ready: { port: 8081 }  # or: { log: "Started .* in" }
+    url: http://localhost:8081
+    autostart: true
+
+  spring-api:
+    group: backend
+    description: Real Spring Boot 4 app with ~10s startup, launched like IntelliJ (mvn -> java)
+    cwd: demo/spring-api
+    command: mvn -o -q spring-boot:run   # -o = offline (deps from ~/.m2)
+    env: { PORT: "8090", DEMO_WARMUP_SECONDS: "8" }
+    ready: { log: "Started SpringApiApplication in", timeout: 2m }
+    url: http://localhost:8090/accounts/42
+
+  gateway:
+    group: backend
+    command: node demo/api.js
+    env: { PORT: "8082", SERVICE_NAME: gateway }
+    depends_on: [api]      # waits until api is ready
+    ready: { log: "Started gateway" }
+    url: http://localhost:8082
+
+  worker:
+    group: jobs
+    command: node demo/worker.js
+    restart: on-failure    # no | on-failure | always
+    max_restarts: 3
+
+  script:
+    group: jobs
+    description: one-shot shell script
+    command: echo "running a one-shot script" && echo done
+
+  # Typed services: no command. Each start builds, then runs (like an IDE run
+  # configuration). Here: a multi-module Maven build, only the app module runs.
+  account-service:
+    group: backend
+    type: spring-boot
+    cwd: demo/bank-suite
+    spring: {module: account-service, profiles: [local], offline: true}
+    ready: {log: "Started .* in"}
+    url: http://localhost:8092/iban
+
+  web-ui:
+    group: frontend
+    type: node
+    cwd: demo/web-ui
+    node: {script: dev}         # npm install runs only when package.json / lock changes
+    ready: {port: 5180}
+    url: http://localhost:5180
+
+# --- Real-world examples (Windows VDI) ---------------------------------------
+#  account-api:
+#    group: backend
+#    type: spring-boot          # build: mvn -DskipTests package -pl app -am
+#    cwd: C:/dev/account-api    # run:   java <jvm_args> -jar app/target/*.jar
+#    spring:
+#      module: app              # sub-module to run ("" or omitted = the root project)
+#      profiles: [local]
+#      jvm_args: -Xmx1g
+#      args: --server.port=8081
+#      mode: package            # or: run  (= mvn spring-boot:run, no separate build)
+#      # skip_tests: false      # tests are skipped by default
+#      # offline: true          # mvn -o
+#    encoding: cp1254           # Java 17 on Turkish Windows prints cp1254 when piped
+#    runtime: [java-17, maven-3.9]
+#
+#  legacy-api:
+#    group: backend
+#    cwd: C:/dev/legacy-api
+#    command: java -jar target/legacy-api.jar --spring.profiles.active=local
+#    runtime: java-11              # same machine, different JDK
+#    ready: { log: "Started .* in", timeout: 5m }
+#    url: http://localhost:8080/swagger-ui.html
+#
+#  admin-ui:
+#    group: frontend
+#    type: node
+#    cwd: C:/dev/admin-ui
+#    node: { script: start, install: if-changed }   # install: if-changed | always | never
+#    runtime: node-20
+#    depends_on: [account-api]
+#    ready: { port: 4200 }
+#
+#  nightly-import:
+#    type: script                # .bat .cmd .ps1 .sh .py
+#    cwd: C:/dev/scripts
+#    script: { file: import.ps1, args: -Env local }
+#
+#  batch-job:                    # type: custom (default) = a raw command
+#    cwd: C:/dev/scripts
+#    shell: C:/Program Files/Git/bin/bash.exe   # cmd (default on Windows) | powershell | pwsh | bash path
+#    command: ./run-batch.sh --env local
+#    env_file: .env.local

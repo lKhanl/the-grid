@@ -1,0 +1,15 @@
+grid.yaml
+*.local.yaml
+.env*
+/grid
+/grid.exe
+/bin/
+web/node_modules/
+.DS_Store
+grid.yaml.bak
+*.yaml.tmp
+target/
+demo/**/node_modules/
+demo/web-ui/package-lock.json
+runner.yaml
+runner.yaml.bak

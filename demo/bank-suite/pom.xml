@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Multi-module demo: a shared library and a Spring Boot app that uses it. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.0.5</version>
+    <relativePath/>
+  </parent>
+  <groupId>demo.bank</groupId>
+  <artifactId>bank-suite</artifactId>
+  <version>0.0.1</version>
+  <packaging>pom</packaging>
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+  <modules>
+    <module>common</module>
+    <module>account-service</module>
+  </modules>
+</project>

@@ -1,0 +1,10 @@
+{
+  "name": "web-ui",
+  "private": true,
+  "scripts": {
+    "dev": "node server.js --port 5180",
+    "start": "node server.js",
+    "lint": "echo no lint"
+  },
+  "engines": { "node": ">=22" }
+}
