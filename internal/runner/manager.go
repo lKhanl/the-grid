@@ -12,8 +12,12 @@ import (
 	"github.com/lKhanl/the-grid/internal/config"
 )
 
+// Version is the app version shown in the UI (set by main).
+var Version = "dev"
+
 // State is a snapshot of everything the UI needs.
 type State struct {
+	Version    string        `json:"version"`
 	Name       string        `json:"name"`
 	ConfigPath string        `json:"configPath"`
 	Runtimes   []RuntimeInfo `json:"runtimes"`
@@ -83,7 +87,7 @@ func (m *Manager) State() State {
 	m.mu.RLock()
 	cfg := m.cfg
 	m.mu.RUnlock()
-	st := State{Name: cfg.Name, ConfigPath: cfg.Path, Services: []Info{}, Runtimes: []RuntimeInfo{}}
+	st := State{Version: Version, Name: cfg.Name, ConfigPath: cfg.Path, Services: []Info{}, Runtimes: []RuntimeInfo{}}
 	for _, name := range cfg.RuntimeOrder {
 		rt := cfg.Runtimes[name]
 		ri := RuntimeInfo{Name: name, Type: rt.Type, Home: rt.Home}

@@ -119,7 +119,12 @@ export default function App() {
       return n
     })
   const [groupDropAt, setGroupDropAt] = useState<{ group: string; after: boolean } | null>(null)
-  const [neon, setNeon] = useState(() => localStorage.getItem('grid.neon') !== 'off')
+  // Off by default when the system asks for less motion (VDIs often turn animations off), but an explicit choice wins.
+  const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, [])
+  const [neon, setNeon] = useState(() => {
+    const v = localStorage.getItem('grid.neon')
+    return v === 'on' || (v !== 'off' && !reducedMotion)
+  })
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [panel, setPanel] = useState<Panel>(() => {
     const p = localStorage.getItem('grid.panel')
@@ -363,6 +368,11 @@ export default function App() {
             <GridIcon size={22} />
           </span>
           <span className="brand-name">THE GRID</span>
+          {state?.version && (
+            <span className="version" title={`The Grid ${state.version}`}>
+              v{state.version.split('+')[0]}
+            </span>
+          )}
           {state?.name && <span className="workspace">{state.name}</span>}
         </div>
         <div className="summary">
@@ -596,7 +606,13 @@ export default function App() {
                   >
                     <span className="setting-text">
                       <span>Neon line around the window</span>
-                      <small>{theme === 'grid' ? 'A light cycle running along the edges.' : 'Only in The Grid theme.'}</small>
+                      <small>
+                        {theme !== 'grid'
+                          ? 'Only in The Grid theme.'
+                          : reducedMotion
+                            ? 'Your system asks for reduced motion, so it starts off here.'
+                            : 'A light cycle running along the edges.'}
+                      </small>
                     </span>
                     <span className={`switch ${neon && theme === 'grid' ? 'on' : ''}`} />
                   </div>
@@ -619,7 +635,10 @@ export default function App() {
                     </div>
                   ))}
                 </section>
-                <div className="settings-foot">Saved in this browser.</div>
+                <div className="settings-foot">
+                  Saved in this browser.
+                  {state?.version && <span className="settings-version">The Grid {state.version}</span>}
+                </div>
               </div>
             </>
           ) : (

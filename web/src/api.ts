@@ -31,6 +31,8 @@ export interface RuntimeInfo {
 }
 
 export interface State {
+  /** e.g. "0.1.0+414c167" */
+  version: string
   name: string
   configPath: string
   runtimes: RuntimeInfo[]

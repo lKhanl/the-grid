@@ -30,8 +30,6 @@ import (
 	"github.com/lKhanl/the-grid/web"
 )
 
-var version = "dev"
-
 const defaultPort = 7070
 
 const usage = `The Grid %s
@@ -115,6 +113,7 @@ func serve(args []string) error {
 		}
 		return err
 	}
+	runner.Version = version
 	m := runner.NewManager(cfg)
 
 	ui, err := fs.Sub(web.Dist, "dist")

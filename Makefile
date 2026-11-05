@@ -1,5 +1,5 @@
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -s -w -X main.version=$(VERSION)
+# The version comes from the VERSION file plus the git commit (stamped by Go itself).
+LDFLAGS := -s -w
 
 .PHONY: web build windows run dev vendor
 

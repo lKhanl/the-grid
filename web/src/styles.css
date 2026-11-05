@@ -290,19 +290,14 @@ details.form-section[open] summary { margin-bottom: 10px; }
 ::selection { background: rgba(25,198,230,.35); }
 
 /* ---- neon light line around the window (Tron light cycle) ---- */
-.neon { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; overflow: visible; }
-.neon rect { x: 1.5px; y: 1.5px; width: calc(100% - 3px); height: calc(100% - 3px); fill: none; stroke: #19c6e6; stroke-linecap: round; animation: neon-run 14s linear infinite; }
+.neon { position: fixed; top: 0; left: 0; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; overflow: visible; }
+.neon rect { fill: none; stroke: #19c6e6; stroke-linecap: round; }
 .neon .t1 { stroke-width: 2; opacity: .35; }
 .neon .t2 { stroke-width: 2.5; opacity: .6; }
 .neon .t3 { stroke-width: 3; opacity: .9; stroke: #5ef2ff; }
 .neon .neon-halo { stroke-width: 12; opacity: .22; stroke: #5ef2ff; }
 .neon .neon-head { stroke-width: 4; stroke: #eaffff; }
-/* every dash moves at the same speed; --o shifts it so all of them end at the head */
-@keyframes neon-run {
-  from { stroke-dashoffset: calc(1000px - var(--o) * 1px); }
-  to { stroke-dashoffset: calc(0px - var(--o) * 1px); }
-}
-@media (prefers-reduced-motion: reduce) { .neon { display: none; } }
+
 
 /* ---- drag & drop ordering ---- */
 .row { position: relative; }
@@ -453,3 +448,5 @@ details.form-section[open] summary { margin-bottom: 10px; }
 .shortcut-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
 .shortcut-group .hint { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; font-size: 13.5px; }
 .shortcut-group .hint .keys { width: 96px; }
+.version { align-self: center; color: var(--muted); font-size: 12px; font-weight: 500; letter-spacing: .02em; padding: 1px 7px; border: 1px solid var(--border); border-radius: 9px; }
+.settings-version { display: block; margin-top: 6px; font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 12px; }
