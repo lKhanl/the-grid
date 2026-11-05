@@ -45,7 +45,9 @@ export interface Entry {
 }
 
 export interface RunnerEvent {
-  type: 'log' | 'service' | 'snapshot'
+  type: 'log' | 'service' | 'snapshot' | 'terms'
+  /** terminal list (snapshot and 'terms' events) */
+  terms?: TermInfo[]
   service?: string
   entry?: Entry
   info?: Info
@@ -338,4 +340,50 @@ export async function previewSpec(spec: ServiceSpec): Promise<{ build: string; r
 /** Persist a new service order (every service, once). */
 export async function reorderServices(names: string[]) {
   await check(await fetch('/api/config/order', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ services: names }) }))
+}
+
+// ---- terminals ----
+
+export interface TermInfo {
+  id: string
+  title: string
+  shell: string
+  cwd: string
+  service?: string
+  runtimes?: string[]
+  pid?: number
+  started: number
+  exited: boolean
+  exitCode?: number
+}
+
+export interface ShellInfo {
+  name: string
+  path: string
+}
+
+export interface OpenTerm {
+  shell?: string
+  service?: string
+  runtimes?: string[]
+  cwd?: string
+  cols?: number
+  rows?: number
+}
+
+export async function listShells(): Promise<ShellInfo[]> {
+  return (await check(await fetch('/api/terms/shells'))).json()
+}
+
+export async function openTerm(o: OpenTerm): Promise<TermInfo> {
+  const r = await fetch('/api/terms', { method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: JSON.stringify(o) })
+  return (await check(r)).json()
+}
+
+export async function closeTerm(id: string) {
+  await check(await fetch(`/api/terms/${encodeURIComponent(id)}`, { method: 'DELETE', headers: HEADERS }))
+}
+
+export function termSocketURL(id: string) {
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/terms/${encodeURIComponent(id)}/ws`
 }

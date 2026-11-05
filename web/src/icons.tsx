@@ -130,6 +130,13 @@ export const RuntimesIcon = ({ size }: P) => (
   </Svg>
 )
 
+export const TerminalIcon = ({ size }: P) => (
+  <Svg size={size}>
+    <path d="M4 17l6-6-6-6" />
+    <path d="M12 19h8" />
+  </Svg>
+)
+
 // Runtime type icons
 export const JavaIcon = ({ size }: P) => (
   <Svg size={size}>
@@ -204,6 +211,18 @@ export const GridIcon = ({ size }: P) => (
 export const ChevronIcon = ({ size }: P) => (
   <Svg size={size}>
     <path d="M9 6l6 6-6 6" />
+  </Svg>
+)
+
+export const ChevronDownIcon = ({ size }: P) => (
+  <Svg size={size}>
+    <path d="M6 9l6 6 6-6" />
+  </Svg>
+)
+
+export const ChevronUpIcon = ({ size }: P) => (
+  <Svg size={size}>
+    <path d="M18 15l-6-6-6 6" />
   </Svg>
 )
 

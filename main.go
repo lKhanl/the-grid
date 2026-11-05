@@ -26,6 +26,7 @@ import (
 	"github.com/lKhanl/the-grid/internal/config"
 	"github.com/lKhanl/the-grid/internal/runner"
 	"github.com/lKhanl/the-grid/internal/server"
+	"github.com/lKhanl/the-grid/internal/term"
 	"github.com/lKhanl/the-grid/web"
 )
 
@@ -124,7 +125,9 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot listen on port %d (already running? try -p): %w", *port, err)
 	}
-	srv := &http.Server{Handler: server.New(m, ui), ReadHeaderTimeout: 10 * time.Second}
+	var terms *term.Manager
+	terms = term.NewManager(func() { m.Hub.Publish(runner.Event{Type: "terms", Terms: terms.List()}) })
+	srv := &http.Server{Handler: server.New(m, terms, ui), ReadHeaderTimeout: 10 * time.Second}
 	url := fmt.Sprintf("http://localhost:%d", *port)
 	fmt.Printf("THE GRID %s\n  config : %s\n  ui     : %s\n  %d programs on the grid. Ctrl+C: end of line (stops everything).\n",
 		version, cfg.Path, url, len(cfg.Services))
@@ -140,7 +143,7 @@ func serve(args []string) error {
 	<-sig
 	fmt.Println("\nstopping all services ...")
 	done := make(chan struct{})
-	go func() { m.Shutdown(); close(done) }()
+	go func() { terms.Shutdown(); m.Shutdown(); close(done) }()
 	select {
 	case <-done:
 	case <-sig:

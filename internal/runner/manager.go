@@ -329,3 +329,25 @@ func (e *envMap) list() []string {
 	sort.Strings(out)
 	return out
 }
+
+// TermEnv is the environment and folder for an interactive terminal: the
+// global env plus the given runtimes, or, for a service, exactly what the
+// service gets (its env, env files and runtimes) in its folder.
+func (m *Manager) TermEnv(service string, runtimes []string) (env []string, cwd string, err error) {
+	off := false
+	sc := config.Service{Runtime: runtimes, Color: &off}
+	cwd = m.ConfigDir()
+	if service != "" {
+		s := m.Get(service)
+		if s == nil {
+			return nil, "", fmt.Errorf("unknown service %q", service)
+		}
+		s.mu.Lock()
+		sc = s.cfg
+		s.mu.Unlock()
+		sc.Color = &off
+		cwd = sc.Cwd
+	}
+	env, err = m.environ(sc)
+	return env, cwd, err
+}

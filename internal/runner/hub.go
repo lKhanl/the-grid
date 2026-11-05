@@ -4,7 +4,7 @@ import "sync"
 
 // Event is pushed to UI/CLI subscribers.
 type Event struct {
-	Type    string `json:"type"` // log | service | snapshot
+	Type    string `json:"type"` // log | service | snapshot | terms
 	Service string `json:"service,omitempty"`
 	Entry   *Entry `json:"entry,omitempty"`
 	Info    *Info  `json:"info,omitempty"`
@@ -12,6 +12,8 @@ type Event struct {
 	// Logs is only sent in the first snapshot of a connection: the log
 	// history of every service, so the UI needs no extra requests.
 	Logs map[string][]Entry `json:"logs,omitempty"`
+	// Terms is the terminal list (snapshot and "terms" events).
+	Terms any `json:"terms,omitempty"`
 }
 
 // Hub fans events out to subscribers. Slow subscribers are dropped

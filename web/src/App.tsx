@@ -1,14 +1,39 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { act, deleteService, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State } from './api'
+import { act, closeTerm, deleteService, openTerm, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State, type TermInfo } from './api'
 import { LogView } from './LogView'
-import { ChevronIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon } from './icons'
+import { ChevronIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon, TerminalIcon } from './icons'
 import { ServiceForm } from './ServiceForm'
 import { RuntimeForm } from './RuntimeForm'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
 import { NeonBorder } from './NeonBorder'
 import { applyTheme, loadTheme, type Theme } from './theme'
+import { loadPrefs, TermPanel, type NewTermPrefs } from './Terminals'
 
 const ACTIVE = new Set(['starting', 'building', 'running', 'stopping'])
+type Panel = 'services' | 'runtimes' | 'settings'
+
+const SHORTCUTS: [string, [string[], string][]][] = [
+  [
+    'Services',
+    [
+      [['↑', '↓'], 'Select service'],
+      [['S'], 'Start / stop'],
+      [['R'], 'Restart'],
+      [['C'], 'Clear log'],
+      [['/'], 'Filter log'],
+      [['Esc'], 'Clear filter'],
+      [['N'], 'New service'],
+      [['E'], 'Edit service'],
+    ],
+  ],
+  [
+    'Terminals',
+    [
+      [['Ctrl', '`'], 'Show / hide terminal panel'],
+      [['Ctrl', '⇧', '`'], 'New terminal'],
+    ],
+  ],
+]
 const BUILDS = new Set(['spring-boot', 'node'])
 
 function uptime(ms?: number) {
@@ -96,11 +121,14 @@ export default function App() {
   const [groupDropAt, setGroupDropAt] = useState<{ group: string; after: boolean } | null>(null)
   const [neon, setNeon] = useState(() => localStorage.getItem('grid.neon') !== 'off')
   const [theme, setTheme] = useState<Theme>(loadTheme)
-  const [panel, setPanel] = useState<'services' | 'runtimes' | 'settings'>(() => {
+  const [panel, setPanel] = useState<Panel>(() => {
     const p = localStorage.getItem('grid.panel')
     return p === 'runtimes' || p === 'settings' ? p : 'services'
-  }
-  )
+  })
+  const [terms, setTerms] = useState<TermInfo[]>([])
+  const [selectedTerm, setSelectedTerm] = useState<string | null>(() => localStorage.getItem('grid.term'))
+  const [termOpen, setTermOpen] = useState(() => localStorage.getItem('grid.term.open') === 'on')
+  const [termMax, setTermMax] = useState(false)
   const filterRef = useRef<HTMLInputElement>(null)
   const selectedRef = useRef(selected)
   selectedRef.current = selected
@@ -109,6 +137,16 @@ export default function App() {
     if (selected) localStorage.setItem('grid.selected', selected)
   }, [selected])
   useEffect(() => localStorage.setItem('grid.panel', panel), [panel])
+  useEffect(() => localStorage.setItem('grid.term.open', termOpen ? 'on' : 'off'), [termOpen])
+  useEffect(() => {
+    if (selectedTerm) localStorage.setItem('grid.term', selectedTerm)
+  }, [selectedTerm])
+  // keep a valid terminal selected when the list changes
+  useEffect(() => {
+    if (selectedTerm && terms.some((t) => t.id === selectedTerm)) return
+    const next = terms[terms.length - 1]?.id ?? null
+    if (next !== selectedTerm) setSelectedTerm(next)
+  }, [terms, selectedTerm])
   useEffect(() => localStorage.setItem('grid.neon', neon ? 'on' : 'off'), [neon])
   useEffect(() => applyTheme(theme), [theme])
 
@@ -120,6 +158,7 @@ export default function App() {
       else if (h.startsWith('new-dir=')) setForm({ editing: null, cwd: h.slice(8) })
       else if (h.startsWith('edit=')) setForm({ editing: h.slice(5) })
       else if (h === 'runtimes' || h === 'services' || h === 'settings') setPanel(h)
+      else if (h === 'terminal') setTermOpen(true)
       else if (h === 'theme=basic' || h === 'theme=grid') setTheme(h.slice(6) as Theme)
       else if (h.startsWith('select=')) setSelected(h.slice(7))
       else if (h.startsWith('runtime=')) setRtForm({ editing: h.slice(8) === 'new' ? null : h.slice(8) })
@@ -145,6 +184,9 @@ export default function App() {
         // ones (after a config change) don't, and the buffers stay as they are.
         // (set, not merge: after a server restart line numbers start again)
         if (ev.logs) for (const s of st.services) store.set(s.name, ev.logs[s.name] ?? [])
+        if (ev.terms) setTerms(ev.terms)
+      } else if (ev.type === 'terms') {
+        setTerms(ev.terms ?? [])
       } else if (ev.type === 'service' && ev.info) {
         const info = ev.info
         setState((st) => st && { ...st, services: st.services.map((s) => (s.name === info.name ? info : s)) })
@@ -177,6 +219,45 @@ export default function App() {
     },
     [store],
   )
+
+  const newTerm = useCallback((o: { service?: string } & Partial<NewTermPrefs>) => {
+    setError(null)
+    openTerm({ shell: o.shell || undefined, runtimes: o.runtimes, cwd: o.cwd || undefined, service: o.service }).then(
+      (t) => {
+        setTerms((list) => (list.some((x) => x.id === t.id) ? list : [...list, t]))
+        setSelectedTerm(t.id)
+        setTermOpen(true)
+      },
+      (e) => setError(`terminal: ${e.message}`),
+    )
+  }, [])
+  const killTerm = useCallback((id: string) => {
+    setTerms((list) => {
+      const i = list.findIndex((t) => t.id === id)
+      const next = list.filter((t) => t.id !== id)
+      // select the neighbour tab, like an editor does
+      setSelectedTerm((cur) => (cur === id ? (next[Math.min(i, next.length - 1)]?.id ?? null) : cur))
+      return next
+    })
+    closeTerm(id).catch(() => {}) // already gone is fine
+  }, [])
+
+  // Ctrl+` shows / hides the terminals (opening one if none is running), Ctrl+Shift+` opens a new one.
+  const termsRef = useRef(terms)
+  termsRef.current = terms
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || (e.key !== '`' && e.code !== 'Backquote')) return
+      e.preventDefault()
+      if (e.shiftKey) return newTerm(loadPrefs())
+      setTermOpen((open) => {
+        if (!open && !termsRef.current.some((t) => !t.exited)) newTerm(loadPrefs())
+        return !open
+      })
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [newTerm])
 
   const services = state?.services ?? []
   const groups = useMemo(() => {
@@ -326,6 +407,19 @@ export default function App() {
           </button>
           <div className="activity-spacer" />
           <button
+            className={`activity ${termOpen ? 'on' : ''}`}
+            aria-label="Terminal"
+            aria-pressed={termOpen}
+            onClick={() => {
+              if (!termOpen && !terms.some((t) => !t.exited)) newTerm(loadPrefs())
+              setTermOpen((v) => !v)
+            }}
+          >
+            <TerminalIcon size={22} />
+            <span className="activity-tip">Terminal panel (Ctrl+`)</span>
+            {terms.some((t) => !t.exited) && <span className="activity-badge">{terms.filter((t) => !t.exited).length}</span>}
+          </button>
+          <button
             className={`activity ${panel === 'settings' ? 'on' : ''}`}
             aria-label="Settings"
             onClick={() => setPanel('settings')}
@@ -464,30 +558,6 @@ export default function App() {
               <Btn icon={<PlusIcon size={14} />} label="Add your first service" title="New service" kind="text" onClick={() => setForm({ editing: null })} />
             </div>
           )}
-          <div className="hints">
-            <div className="hints-title">Shortcuts</div>
-            {(
-              [
-                [['↑', '↓'], 'Select service'],
-                [['S'], 'Start / stop'],
-                [['R'], 'Restart'],
-                [['C'], 'Clear log'],
-                [['/'], 'Filter log'],
-                [['N'], 'New service'],
-                [['E'], 'Edit service'],
-                [['Esc'], 'Clear filter'],
-              ] as [string[], string][]
-            ).map(([keys, label]) => (
-              <div key={label} className="hint">
-                <span className="keys">
-                  {keys.map((k) => (
-                    <kbd key={k}>{k}</kbd>
-                  ))}
-                </span>
-                <span>{label}</span>
-              </div>
-            ))}
-          </div>
             </>
           ) : panel === 'settings' ? (
             <>
@@ -531,6 +601,24 @@ export default function App() {
                     <span className={`switch ${neon && theme === 'grid' ? 'on' : ''}`} />
                   </div>
                 </section>
+                <section>
+                  <h4>Keyboard shortcuts</h4>
+                  {SHORTCUTS.map(([title, list]) => (
+                    <div key={title} className="shortcut-group">
+                      <div className="shortcut-title">{title}</div>
+                      {list.map(([keys, label]) => (
+                        <div key={label} className="hint">
+                          <span className="keys">
+                            {keys.map((k) => (
+                              <kbd key={k}>{k}</kbd>
+                            ))}
+                          </span>
+                          <span>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </section>
                 <div className="settings-foot">Saved in this browser.</div>
               </div>
             </>
@@ -569,6 +657,7 @@ export default function App() {
           )}
         </aside>
         <section className="detail">
+          <div className="detail-pane" style={{ display: termOpen && termMax ? 'none' : 'flex' }}>
           {current ? (
             <div className="toolbar">
               <StatusIcon status={current.status} type={current.type} size={18} />
@@ -644,6 +733,22 @@ export default function App() {
             </div>
           )}
           <LogView service={selected} store={store} filter={filter} theme={theme} />
+          </div>
+          {(termOpen || terms.length > 0) && (
+            <TermPanel
+              open={termOpen}
+              state={state}
+              terms={terms}
+              selected={selectedTerm}
+              theme={theme}
+              maximized={termMax}
+              onMaximize={setTermMax}
+              onSelect={setSelectedTerm}
+              onKill={killTerm}
+              onNew={(p) => newTerm(p)}
+              onHide={() => setTermOpen(false)}
+            />
+          )}
         </section>
       </div>
       {form && state && (
@@ -679,6 +784,7 @@ export default function App() {
           { label: 'Restart', icon: <RestartIcon size={14} />, hint: 'R', onSelect: () => run(s.name, 'restart') },
           { label: 'Clear log', icon: <ClearIcon size={14} />, hint: 'C', onSelect: () => run(s.name, 'clear') },
           ...(s.url ? [{ label: 'Open URL', icon: <ExternalIcon size={14} />, onSelect: () => window.open(s.url, '_blank', 'noreferrer') }] : []),
+          { label: 'Open terminal here', icon: <TerminalIcon size={14} />, onSelect: () => newTerm({ ...loadPrefs(), service: s.name }) },
           'sep',
           { label: 'Edit…', icon: <EditIcon size={14} />, hint: 'E', onSelect: () => setForm({ editing: s.name }) },
           {

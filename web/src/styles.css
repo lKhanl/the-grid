@@ -412,3 +412,44 @@ details.form-section[open] summary { margin-bottom: 10px; }
 .switch.on { background: var(--accent); border-color: var(--accent); }
 .switch.on::after { transform: translateX(14px); background: #fff; }
 .settings-foot { color: var(--muted); font-size: 12px; }
+
+/* ---- terminal panel (bottom, VS Code style) ---- */
+.detail-pane { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.term-panel { position: relative; flex: none; display: flex; flex-direction: column; min-height: 120px; border-top: 1px solid var(--border); background: var(--bg); }
+.term-panel.max { flex: 1; }
+.term-panel.dragging { user-select: none; }
+.term-resizer { position: absolute; left: 0; right: 0; top: -4px; height: 8px; cursor: row-resize; z-index: 3; }
+.term-resizer:hover, .term-panel.dragging .term-resizer { background: linear-gradient(transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
+.term-head { position: relative; flex: none; display: flex; align-items: stretch; height: 36px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.term-head-label { display: flex; align-items: center; padding: 0 12px 0 14px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; flex: none; }
+.term-tabs { display: flex; align-items: stretch; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.term-tabs::-webkit-scrollbar { height: 3px; }
+.term-tab { position: relative; display: flex; align-items: center; gap: 7px; padding: 0 6px 0 12px; min-width: 96px; max-width: 200px; flex: none; border-right: 1px solid var(--border); color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; font-size: 13.5px; }
+.term-tab:first-child { border-left: 1px solid var(--border); }
+.term-tab:hover { background: var(--hover); color: var(--text); }
+.term-tab.on { background: var(--bg); color: var(--text); }
+.term-tab.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); }
+.term-tab .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.term-tab.term-exited .name { text-decoration: line-through; opacity: .7; }
+.tab-close { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 0; border-radius: 4px; background: none; color: inherit; cursor: pointer; opacity: 0; flex: none; }
+.term-tab:hover .tab-close, .term-tab.on .tab-close { opacity: .75; }
+.tab-close:hover { opacity: 1 !important; background: #43454a; }
+.term-info { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 10px; font-size: 13px; overflow: hidden; white-space: nowrap; }
+.term-cwd { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.term-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; padding: 0 6px; flex: none; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 26px; border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; }
+.icon-btn:hover, .icon-btn.on { color: var(--text); background: var(--hover); }
+.term-stack { flex: 1; min-height: 0; display: flex; background: var(--bg); }
+.term-host { flex: 1; min-width: 0; padding: 4px 0 0 10px; background: var(--bg); }
+.term-host .xterm { height: 100%; }
+.term-host .xterm-viewport { background: var(--bg) !important; }
+.term-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
+.term-new { position: absolute; right: 8px; top: 38px; z-index: 20; width: 340px; padding: 12px 12px 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); box-shadow: 0 8px 28px rgba(0,0,0,.45); }
+.term-new.up { top: auto; bottom: 40px; }
+.term-new-title { font-weight: 600; margin-bottom: 10px; }
+.term-new .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.term-new-actions { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 8px; }
+.shortcut-group { margin-bottom: 14px; }
+.shortcut-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+.shortcut-group .hint { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; font-size: 13.5px; }
+.shortcut-group .hint .keys { width: 96px; }

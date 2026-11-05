@@ -14,6 +14,7 @@ import (
 	"github.com/lKhanl/the-grid/internal/config"
 	"github.com/lKhanl/the-grid/internal/detect"
 	"github.com/lKhanl/the-grid/internal/runner"
+	"github.com/lKhanl/the-grid/internal/term"
 )
 
 func isActive(s runner.Status) bool {
@@ -25,12 +26,13 @@ func isActive(s runner.Status) bool {
 // answer), so random web pages cannot start/stop services.
 const CSRFHeader = "X-Grid"
 
-func New(m *runner.Manager, ui fs.FS) http.Handler {
+func New(m *runner.Manager, terms *term.Manager, ui fs.FS) http.Handler {
 	mux := http.NewServeMux()
+	termRoutes(mux, m, terms)
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, m.State())
 	})
-	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) { events(m, w, r) })
+	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) { events(m, terms, w, r) })
 	mux.HandleFunc("GET /api/services/{name}/logs", func(w http.ResponseWriter, r *http.Request) {
 		s := m.Get(r.PathValue("name"))
 		if s == nil {
@@ -241,7 +243,7 @@ func guard(next http.Handler) http.Handler {
 	})
 }
 
-func events(m *runner.Manager, w http.ResponseWriter, r *http.Request) {
+func events(m *runner.Manager, terms *term.Manager, w http.ResponseWriter, r *http.Request) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "streaming unsupported")
@@ -262,7 +264,7 @@ func events(m *runner.Manager, w http.ResponseWriter, r *http.Request) {
 	for _, s := range m.Services() {
 		logs[s.Name()] = s.Logs(10000)
 	}
-	writeEvent(w, runner.Event{Type: "snapshot", State: &st, Logs: logs})
+	writeEvent(w, runner.Event{Type: "snapshot", State: &st, Logs: logs, Terms: terms.List()})
 	fl.Flush()
 
 	ping := time.NewTicker(15 * time.Second)
