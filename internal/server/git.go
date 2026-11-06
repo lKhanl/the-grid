@@ -151,7 +151,7 @@ func gitRoutes(mux *http.ServeMux, m *runner.Manager) {
 			writeError(w, http.StatusNotFound, "unknown repository")
 			return
 		}
-		d, err := gitdiff.FileDiff(root, r.URL.Query().Get("path"))
+		d, err := gitdiff.FileDiff(r.Context(), root, r.URL.Query().Get("path"))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

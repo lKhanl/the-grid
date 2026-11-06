@@ -453,8 +453,8 @@ export async function gitChanges(): Promise<{ projects: GitProject[]; error?: st
   return (await check(await fetch('/api/git/changes'))).json()
 }
 
-export async function gitDiff(repo: string, path: string): Promise<GitDiff> {
-  return (await check(await fetch(`/api/git/diff?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(path)}`))).json()
+export async function gitDiff(repo: string, path: string, signal?: AbortSignal): Promise<GitDiff> {
+  return (await check(await fetch(`/api/git/diff?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(path)}`, { signal }))).json()
 }
 
 // ---- workspaces ----

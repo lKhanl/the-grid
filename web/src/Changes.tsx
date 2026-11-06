@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isYaml, langOf, tokenize, tokenizeMarkup, tokenizeYaml, type Tok } from './highlight'
 import { gitChanges, gitDiff, type GitDiff, type GitFile, type GitProject } from './api'
 import { ChevronIcon, FolderIcon, ReloadIcon } from './icons'
@@ -29,9 +29,13 @@ export function useGit(active: boolean): GitState {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  const refresh = useCallback(() => {
-    setLoading(true)
-    gitChanges()
+  const busy = useRef(false)
+  // `quiet` = the automatic poll: no spinner, and never a second request while one is still running
+  const load = useCallback((quiet: boolean): Promise<void> => {
+    if (busy.current) return Promise.resolve()
+    busy.current = true
+    if (!quiet) setLoading(true)
+    return gitChanges()
       .then(({ projects, error }) => {
         setProjects(projects)
         setError(projects.length ? null : error || null)
@@ -42,22 +46,37 @@ export function useGit(active: boolean): GitState {
         })
       })
       .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        busy.current = false
+        setLoading(false)
+      })
   }, [])
+  const refresh = useCallback(() => void load(false), [load])
 
   useEffect(() => {
-    refresh()
+    void load(true)
     if (!active) return
-    const id = setInterval(refresh, 5000)
-    const onFocus = () => document.visibilityState === 'visible' && refresh()
+    // poll every 5 s, but wait at least twice as long as the last refresh took (a slow machine or
+    // many repositories must not be kept busy by git status all the time)
+    let timer = 0
+    let stopped = false
+    const loop = () => {
+      const t0 = Date.now()
+      void load(true).then(() => {
+        if (!stopped) timer = window.setTimeout(loop, Math.max(5000, 2 * (Date.now() - t0)))
+      })
+    }
+    timer = window.setTimeout(loop, 5000)
+    const onFocus = () => document.visibilityState === 'visible' && void load(true)
     document.addEventListener('visibilitychange', onFocus)
     window.addEventListener('focus', onFocus)
     return () => {
-      clearInterval(id)
+      stopped = true
+      window.clearTimeout(timer)
       document.removeEventListener('visibilitychange', onFocus)
       window.removeEventListener('focus', onFocus)
     }
-  }, [active, refresh])
+  }, [active, load])
 
   const total = projects.reduce((n, p) => n + p.files.length, 0)
   return { projects, sel, setSel, error, loading, refresh, total }
@@ -337,12 +356,16 @@ function Code({ l }: { l: Line }) {
 
 // ---- diff pane ----
 
+const MAX_SHOWN = 1500
+
 export type DiffMode = 'split' | 'unified'
 
 export function DiffPane({ git }: { git: GitState }) {
   const [mode, setMode] = useState<DiffMode>(() => (localStorage.getItem('grid.git.mode') === 'unified' ? 'unified' : 'split'))
   const [diff, setDiff] = useState<GitDiff | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [loadingDiff, setLoadingDiff] = useState(false)
+  const [shown, setShown] = useState(MAX_SHOWN) // lines drawn: thousands of table rows are slow on a VDI
   const repo = git.sel?.root ?? null
   const file = git.sel?.path ?? null
   const info = git.projects.find((p) => p.root === repo)?.files.find((f) => f.path === file)
@@ -355,14 +378,24 @@ export function DiffPane({ git }: { git: GitState }) {
       setDiff(null)
       return
     }
-    let live = true
-    gitDiff(repo, file).then(
-      (d) => live && (setDiff(d), setErr(null)),
-      (e: Error) => live && setErr(e.message),
+    // the previous file's diff goes away at once: a slow answer must not look like the new file
+    setDiff(null)
+    setErr(null)
+    setLoadingDiff(true)
+    setShown(MAX_SHOWN)
+    const ctl = new AbortController()
+    gitDiff(repo, file, ctl.signal).then(
+      (d) => {
+        setDiff(d)
+        setLoadingDiff(false)
+      },
+      (e: Error) => {
+        if (ctl.signal.aborted) return
+        setErr(e.message)
+        setLoadingDiff(false)
+      },
     )
-    return () => {
-      live = false
-    }
+    return () => ctl.abort() // also stops the git process on the server
   }, [repo, file, stamp])
 
   const hunks = useMemo(() => {
@@ -370,6 +403,18 @@ export function DiffPane({ git }: { git: GitState }) {
     if (file) colorize(h, file)
     return h
   }, [diff, file])
+  const total = hunks.reduce((n, h) => n + h.lines.length, 0)
+  const drawn = useMemo(() => {
+    if (total <= shown) return hunks
+    let left = shown
+    const out: Hunk[] = []
+    for (const h of hunks) {
+      if (left <= 0) break
+      out.push(h.lines.length <= left ? h : { ...h, lines: h.lines.slice(0, left) })
+      left -= h.lines.length
+    }
+    return out
+  }, [hunks, total, shown])
   const [dir, name] = split(file ?? '')
   return (
     <div className="detail-pane diff-pane">
@@ -400,11 +445,12 @@ export function DiffPane({ git }: { git: GitState }) {
       </div>
       <div className="diff-body">
         {err && <div className="diff-note">{err}</div>}
+        {!err && file && loadingDiff && <div className="diff-note">Loading…</div>}
         {!err && !file && <div className="diff-note">{git.error ?? 'Pick a changed file on the left.'}</div>}
         {!err && diff?.binary && <div className="diff-note">Binary file, no text diff.</div>}
         {!err && diff && !diff.binary && hunks.length === 0 && <div className="diff-note">{info?.status === 'U' ? 'Empty file.' : 'No textual changes (mode change only?).'}</div>}
         {!err &&
-          hunks.map((h, i) => (
+          drawn.map((h, i) => (
             <div key={i} className="hunk">
               <div className="hunk-head">{h.header || `change ${i + 1}`}</div>
               {mode === 'split' ? (
@@ -449,6 +495,17 @@ export function DiffPane({ git }: { git: GitState }) {
               )}
             </div>
           ))}
+        {total > shown && (
+          <div className="diff-note">
+            Showing the first {shown.toLocaleString('en-US')} of {total.toLocaleString('en-US')} lines.{' '}
+            <button className="btn text small" onClick={() => setShown(shown + 3000)}>
+              Show {Math.min(3000, total - shown).toLocaleString('en-US')} more
+            </button>{' '}
+            <button className="btn text small" onClick={() => setShown(total)}>
+              Show all
+            </button>
+          </div>
+        )}
         {diff?.truncated && <div className="diff-note">Diff truncated (too large).</div>}
         {hunks.length > 0 && (
           <div className={`diff-fill ${mode}`} aria-hidden>

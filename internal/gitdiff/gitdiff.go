@@ -47,7 +47,12 @@ type Diff struct {
 }
 
 func git(dir string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	return gitCtx(context.Background(), dir, args...)
+}
+
+// gitCtx is git, but it stops when ctx is done (a request the browser gave up on).
+func gitCtx(parent context.Context, dir string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(parent, gitTimeout)
 	defer cancel()
 	c := exec.CommandContext(ctx, "git", append([]string{"-c", "core.quotepath=false", "-c", "color.ui=false"}, args...)...)
 	c.Dir = dir
@@ -177,7 +182,10 @@ func countLines(path string) (lines int, binary bool) {
 
 // FileDiff returns the unified diff of one file against HEAD. rel must be a
 // path inside the repository, as listed by Status.
-func FileDiff(root, rel string) (Diff, error) {
+//
+// It asks git about this one path only. (It used to run the full Status of the whole
+// repository first, which on a slow machine with big changes made every click take seconds.)
+func FileDiff(ctx context.Context, root, rel string) (Diff, error) {
 	rel = filepath.ToSlash(rel)
 	if rel == "" || strings.HasPrefix(rel, "/") || strings.Contains(rel, "\x00") {
 		return Diff{}, errors.New("bad path")
@@ -187,34 +195,33 @@ func FileDiff(root, rel string) (Diff, error) {
 			return Diff{}, errors.New("bad path")
 		}
 	}
-	st, err := Status(root)
+	st, err := gitCtx(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", "--", rel)
 	if err != nil {
 		return Diff{}, err
 	}
-	var file *File
-	for i := range st.Files {
-		if st.Files[i].Path == rel {
-			file = &st.Files[i]
-			break
-		}
-	}
-	if file == nil {
+	rec := strings.SplitN(string(st), "\x00", 2)[0]
+	if len(rec) < 4 {
 		return Diff{}, errors.New("file has no changes")
 	}
-	if file.Binary {
-		return Diff{Binary: true}, nil
-	}
 	var out []byte
-	if file.Status == "U" {
+	if rec[0] == '?' && rec[1] == '?' { // untracked
+		if _, binary := countLines(filepath.Join(root, filepath.FromSlash(rel))); binary {
+			return Diff{Binary: true}, nil
+		}
 		// --no-index exits with 1 when the files differ.
-		out, err = git(root, "diff", "--no-index", "--no-color", "-U6", "--", os.DevNull, rel)
+		out, err = gitCtx(ctx, root, "diff", "--no-index", "--no-color", "-U6", "--", os.DevNull, rel)
 		if err != nil && len(out) == 0 {
 			return Diff{}, err
 		}
 	} else {
-		out, err = git(root, "diff", base(root), "--no-color", "--no-renames", "-U6", "--", rel)
-		if err != nil {
-			return Diff{}, err
+		out, err = gitCtx(ctx, root, "diff", "HEAD", "--no-color", "--no-renames", "-U6", "--", rel)
+		if err != nil { // a repository without commits: compare with the empty tree
+			if out, err = gitCtx(ctx, root, "diff", emptyTree, "--no-color", "--no-renames", "-U6", "--", rel); err != nil {
+				return Diff{}, err
+			}
+		}
+		if bytes.HasPrefix(out, []byte("diff --git")) && bytes.Contains(firstBytes(out, 400), []byte("\nBinary files ")) {
+			return Diff{Binary: true}, nil
 		}
 	}
 	d := Diff{}
@@ -223,4 +230,11 @@ func FileDiff(root, rel string) (Diff, error) {
 	}
 	d.Text = string(out)
 	return d, nil
+}
+
+func firstBytes(b []byte, n int) []byte {
+	if len(b) > n {
+		return b[:n]
+	}
+	return b
 }

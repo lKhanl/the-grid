@@ -1,6 +1,10 @@
-# The Grid
+<p align="center">
+  <img src="docs/logo.svg" alt="The Grid" width="96" height="96">
+</p>
 
-> *"The Grid. A digital frontier."* Your services are the programs; you run them from here.
+<h1 align="center">The Grid</h1>
+
+<p align="center"><em>"The Grid. A digital frontier."</em> Your services are the programs; you run them from here.</p>
 
 Run, watch and restart all the local services of a workspace from one browser tab —
 like IntelliJ's **Services** tool window, without the IDE.
@@ -23,12 +27,15 @@ need 3–4 APIs, UIs and scripts running side by side with their logs one click 
 
 - One self-contained binary (UI embedded), no install, no admin rights
 - Groups, start/stop/restart per service, group or all
-- Spring Boot (Maven), Node and script services are detected from the folder; every start
-  builds, then runs — no command to write
+- Spring Boot (Maven), Node and script services are detected from the folder; each start
+  builds when needed, then runs — no command to write
 - Add / edit / delete services and runtimes from the UI (writes `grid.yaml`, keeps comments)
 - Several JDKs / Node versions side by side (`runtimes`), one per service
-- **Changes** view: read-only git diff per service (files as a tree, side-by-side or unified) to review what an AI agent wrote
+- **Changes** view: read-only git diff per service (files as a tree, side-by-side or unified, syntax coloured) to review what an AI agent wrote
 - Live colored logs (xterm.js), filter, 1k-10k lines per service (Settings → Logs, default 5k)
+- **Terminals** in the same window (``Ctrl+` ``): real shells (cmd, PowerShell, Git Bash, bash, zsh…) opened in the
+  selected service's folder, several at once (Windows 10 1809+ for the pseudo-console)
+- **Database** panel: a small Oracle SQL client you can share with your AI agent over MCP (see below)
 - `depends_on` + readiness (`port` or log regex) so things start in order
 - Restart policies (`on-failure`, `always`)
 - Clean process-tree kill: Windows Job Objects / Unix process groups — no orphan
@@ -48,8 +55,12 @@ go build -o grid .               # Windows: go build -o grid.exe .
 Grid remembers the workspaces you open in `~/.grid/state.json` (override with `$GRID_HOME`).
 Without `-c` it reopens the last one; switch workspaces from the name next to the logo.
 
-The UI is prebuilt in `web/dist` and Go deps are vendored, so building only needs Go —
-no npm or internet access.
+Prebuilt binaries (`grid.exe` for Windows x64, `grid-macos` for Apple silicon, with `SHA256SUMS.txt`) are on the
+[Releases](../../releases) page. The UI is prebuilt in `web/dist` and Go deps are vendored, so building only needs
+Go — no npm or internet access.
+
+Keyboard (Services): `j`/`k` move, `/` filter the log, `s` start or stop, `r` restart, `c` clear, `n` new,
+`e` edit, ``Ctrl+` `` terminals.
 
 ## Service types: build, then run
 
@@ -58,12 +69,17 @@ The commands are derived on every start, so they follow changes in `pom.xml`:
 
 | `type` | build step (every start) | run |
 |---|---|---|
-| `spring-boot` | `mvn -B -DskipTests package [-pl <module> -am]` (uses `mvnw` if present) | `java <jvm_args> -jar <module>/target/*.jar --spring.profiles.active=…` |
+| `spring-boot` | `mvn -B -Dmaven.test.skip=true package [-pl <module> -am]` (uses `mvnw` if present), skipped when nothing changed | `java <jvm_args> -jar <module>/target/*.jar --spring.profiles.active=…` |
 | `spring-boot` + `mode: run` | — | `mvn spring-boot:run` |
 | `node` | `npm/yarn/pnpm install`, only when `package.json` or the lock file changed | `npm run <script>` |
 | `script` | — | the `.bat` / `.cmd` / `.ps1` / `.sh` / `.py` file |
 | `jar` | — | `java <jvm_args> -jar <file> <args>` (an already built jar; `file` may use `*`, newest match wins) |
 | `custom` (default) | — | `command` as written |
+
+A Spring Boot build is **skipped when nothing changed**: Grid remembers when the last build started and
+compares it with the newest file under `src/`, the `pom.xml` files and `.mvn` (the jar's own date can't be used).
+Tick **Always rebuild** (`always_build: true`) to build on every start. By default tests are neither run nor
+compiled (`skip_tests`), which is the biggest saving on a slow machine.
 
 While the build runs the service shows **building**; a failed build stops there (the app is
 not started), and Stop/Restart during a build cancel it. Right-click → **Run without build**
@@ -106,11 +122,20 @@ Without MCP the same works through the CLI (`grid status`, `grid logs <svc> -n 1
 
 ## Database panel
 
-A small SQL client for Oracle 19c (pure Go driver: no Oracle client to install; one exe is enough).
-Open the **Database** panel (cylinder icon): add a connection (host + port + service name, or SID, or a TNS
-descriptor / alias from `tnsnames.ora`), test it, then browse schemas, tables and columns on the left and run
-SQL on the right (`Ctrl+Enter` runs the selection, or everything: several statements separated by `;` run one after the other, each result in its own tab, stopping at the first error; a PL/SQL block ends with a `/` line). `Ctrl+Shift+Enter` runs only the statement under the cursor. The editor suggests tables, views, schemas and columns from the database as you type (`FROM emp…`, `e.` after an alias). Big results are paged with Prev / Next. Results are a scrolling grid you can copy
-or download as CSV; `Stop` cancels a running statement.
+A small SQL client for Oracle (pure Go driver: no Oracle client to install, one exe is enough). It targets 19c;
+the automated tests use a fake driver and it was tried against Oracle 23ai.
+
+Open the **Database** panel (cylinder icon), add a connection (host + port + service name, or SID, or a TNS
+descriptor / alias from `tnsnames.ora`), test it, then browse schemas, tables and columns on the left and write SQL
+on the right:
+
+- **Run:** `Ctrl+Enter` runs the selection, or everything; `Ctrl+Shift+Enter` only the statement under the cursor.
+  `Stop` cancels a running statement.
+- **Several statements** (separated by `;`) run one after the other, each result in its own tab, stopping at the
+  first error. A PL/SQL block ends with a line holding only `/`.
+- **Completion:** tables, views, schemas and columns from the database as you type (`FROM emp…`, `e.` after an alias).
+- **Results:** a scrolling grid you can copy or download as CSV, paged with Prev / Next. The row limit
+  (10–1000) is next to **Run**.
 
 - **Commit and rollback:** by default changes wait for **Commit** / **Rollback** (a yellow bar reminds you).
   Tick "Commit every statement automatically" on the connection if you prefer that.
@@ -160,6 +185,7 @@ grid start|stop|restart|clear <service|group|all>
 grid logs <service> [-n 200] [-f] [--raw]
 grid reload
 grid runtimes              # check every runtime path and print its real version
+grid mcp [-p 7070] [--wait 40]   # MCP server for AI agents (see above)
 ```
 
 For the fans: `grid programs` = status, `grid rez <x>` = start, `grid derezz <x>` = stop,
@@ -172,7 +198,7 @@ See [`grid.example.yaml`](grid.example.yaml) for every option.
 | key | meaning |
 |---|---|
 | `type` | `spring-boot`, `node`, `script`, `jar` or `custom` (default); see *Service types* |
-| `spring` / `node` / `script` / `jar` | options of the typed service (module, profiles, jvm_args, args, mode, skip_tests, offline / script, args, install, package_manager / file, args / file, jvm_args, args) |
+| `spring` / `node` / `script` / `jar` | options of the typed service (module, profiles, jvm_args, args, mode, skip_tests, always_build, offline / script, args, install, package_manager / file, args / file, jvm_args, args) |
 | `command` | command line for `custom` services, run through `shell` |
 | `shell` | Windows: `cmd` (default), `powershell`, `pwsh` or a bash path; Unix: `/bin/sh` |
 | `cwd` | working directory, relative to the config file |
@@ -227,7 +253,9 @@ service still uses cannot be deleted; renaming one updates the services that use
 
 ```sh
 make dev     # Go API on :7070 + Vite with hot reload on :5173
+make build   # local binary in bin/ (build web/dist first when the UI changed)
 make web     # rebuild web/dist (commit it)
 make vendor  # after changing Go deps (commit vendor/)
 make windows # cross-compile bin/grid.exe
+go test ./...  # backend tests (the Database tests use a fake driver, no Oracle needed)
 ```
