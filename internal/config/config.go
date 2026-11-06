@@ -81,11 +81,15 @@ type Service struct {
 	Autostart   bool              `yaml:"autostart"`
 	StopTimeout time.Duration     `yaml:"stop_timeout"`
 	URL         string            `yaml:"url"`
+	Changes     *bool             `yaml:"changes"` // false: leave this project out of the Changes view (default: shown)
 	Color       *bool             `yaml:"color"`
 	Runtime     StringList        `yaml:"runtime"` // names from the top-level `runtimes`
 
 	ReadyRegexp *regexp.Regexp `yaml:"-"`
 }
+
+// ShowInChanges reports whether the project of this service is listed in the Changes view.
+func (s Service) ShowInChanges() bool { return s.Changes == nil || *s.Changes }
 
 // Ready describes how to detect that a service finished starting.
 type Ready struct {

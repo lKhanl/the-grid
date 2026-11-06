@@ -208,6 +208,7 @@ See [`grid.example.yaml`](grid.example.yaml) for every option.
 | `ready` | `{ port: 8080 }` or `{ log: "Started .* in" }`, optional `timeout` |
 | `restart`, `max_restarts` | `no` / `on-failure` / `always` |
 | `autostart` | start when the runner starts |
+| `changes` | `false` keeps this service's project out of the **Changes** view (form: *Show this project in Changes*). Services sharing a working directory are one project, so `false` on any of them hides it |
 | `encoding` | `auto` (default), `utf-8`, `cp1254` |
 | `url` | link shown in the UI |
 | `stop_timeout` | grace period before kill (Unix), default `10s` |

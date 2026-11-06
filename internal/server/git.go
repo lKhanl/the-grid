@@ -22,6 +22,7 @@ type gitProject struct {
 	Prefix   string         `json:"prefix"` // project folder inside the repository ("" = the root), slash separated
 	Branch   string         `json:"branch"`
 	Files    []gitdiff.File `json:"files"` // paths relative to Root
+	hidden   bool           // a service of the project is set to stay out of Changes (services in one folder share a project)
 }
 
 func under(path, prefix string) bool {
@@ -34,6 +35,7 @@ func under(path, prefix string) bool {
 func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 	type key struct{ root, prefix string }
 	projects := map[key]*gitProject{}
+	visible := map[string]bool{} // repository -> at least one of its services is shown in Changes
 	var firstErr string
 	for _, s := range m.State().Services {
 		var root string
@@ -56,6 +58,9 @@ func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 		if root == "" {
 			continue
 		}
+		if !s.NoChanges {
+			visible[root] = true
+		}
 		prefix := ""
 		if rel, err := filepath.Rel(root, s.Cwd); err == nil && rel != "." {
 			prefix = filepath.ToSlash(rel)
@@ -65,6 +70,9 @@ func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 		if p == nil {
 			p = &gitProject{Key: root + "|" + prefix, Name: s.Name, Root: root, Prefix: prefix, Files: []gitdiff.File{}}
 			projects[k] = p
+		}
+		if s.NoChanges {
+			p.hidden = true
 		}
 		p.Services = append(p.Services, s.Name)
 		p.Types = append(p.Types, string(s.Type))
@@ -79,6 +87,9 @@ func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 	}
 	var out []gitProject
 	for root, list := range byRoot {
+		if !visible[root] { // every service of this repository is hidden: nothing of it is listed, not even its other files
+			continue
+		}
 		st, err := gitdiff.Status(root)
 		if err != nil {
 			return nil, err.Error()
@@ -113,7 +124,7 @@ func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 			}
 		}
 		for _, p := range list {
-			if len(p.Files) == 0 {
+			if len(p.Files) == 0 || p.hidden { // a hidden project still claims its files, so they do not show up as "other files"
 				continue
 			}
 			p.Branch = st.Branch

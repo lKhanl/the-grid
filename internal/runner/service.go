@@ -44,6 +44,7 @@ type Info struct {
 	DependsOn   []string `json:"dependsOn,omitempty"`
 	Ready       string   `json:"ready,omitempty"`
 	Runtimes    []string `json:"runtimes,omitempty"`
+	NoChanges   bool     `json:"noChanges,omitempty"` // left out of the Changes view
 }
 
 type Service struct {
@@ -84,7 +85,7 @@ func (s *Service) Info() Info {
 		Name: s.name, Group: s.cfg.Group, Description: s.cfg.Description, Status: s.status,
 		PID: s.pid, ExitCode: s.exitCode, Restarts: s.restarts,
 		Type: s.cfg.Type, Build: s.prevBuild, Command: s.prevRun, Cwd: s.cfg.Cwd, URL: s.cfg.URL, DependsOn: s.cfg.DependsOn,
-		Runtimes: s.cfg.Runtime,
+		Runtimes: s.cfg.Runtime, NoChanges: !s.cfg.ShowInChanges(),
 	}
 	if !s.startedAt.IsZero() && (s.status == Running || s.status == Starting || s.status == Building || s.status == Stopping) {
 		info.StartedAt = s.startedAt.UnixMilli()

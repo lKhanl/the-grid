@@ -315,3 +315,37 @@ func TestReorderServices(t *testing.T) {
 		}
 	}
 }
+
+func TestChangesVisibilityRoundTrip(t *testing.T) {
+	p := setup(t)
+	spec, err := ReadSpec(p, "api")
+	if err != nil || spec.NoChanges {
+		t.Fatalf("shown by default: %v %+v", err, spec)
+	}
+	spec.NoChanges = true
+	if err := SaveService(p, "api", spec); err != nil {
+		t.Fatal(err)
+	}
+	if out := read(t, p); !strings.Contains(out, "changes: false") {
+		t.Fatalf("not written:\n%s", out)
+	}
+	if spec, _ = ReadSpec(p, "api"); !spec.NoChanges {
+		t.Fatal("not read back")
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range cfg.Services {
+		if (s.Name == "api") == s.ShowInChanges() {
+			t.Fatalf("%s: ShowInChanges = %v", s.Name, s.ShowInChanges())
+		}
+	}
+	spec.NoChanges = false // shown again: the key goes away instead of staying as `changes: true`
+	if err := SaveService(p, "api", spec); err != nil {
+		t.Fatal(err)
+	}
+	if out := read(t, p); strings.Contains(out, "changes:") {
+		t.Fatalf("key left behind:\n%s", out)
+	}
+}

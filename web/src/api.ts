@@ -227,6 +227,7 @@ export interface ServiceSpec {
   autostart: boolean
   stopTimeout: string
   url: string
+  noChanges: boolean // keep the project out of the Changes view
 }
 
 export const emptySpec = (): ServiceSpec => ({
@@ -250,6 +251,7 @@ export const emptySpec = (): ServiceSpec => ({
   autostart: false,
   stopTimeout: '',
   url: '',
+  noChanges: false,
 })
 
 const JSON_HEADERS = { ...HEADERS, 'Content-Type': 'application/json' }

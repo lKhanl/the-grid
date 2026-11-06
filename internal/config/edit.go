@@ -81,6 +81,7 @@ type ServiceSpec struct {
 	Autostart    bool        `json:"autostart"`
 	StopTimeout  string      `json:"stopTimeout"`
 	URL          string      `json:"url"`
+	NoChanges    bool        `json:"noChanges"` // keep the project out of the Changes view
 }
 
 type rawSpec struct {
@@ -109,6 +110,7 @@ type rawSpec struct {
 	Autostart   bool   `yaml:"autostart"`
 	StopTimeout string `yaml:"stop_timeout"`
 	URL         string `yaml:"url"`
+	Changes     *bool  `yaml:"changes"`
 }
 
 var (
@@ -119,7 +121,7 @@ var (
 
 // keyOrder is used when adding keys to a service.
 var keyOrder = []string{"group", "description", "type", "cwd", "command", "spring", "node", "script", "jar", "shell", "runtime", "env", "env_file",
-	"encoding", "depends_on", "ready", "restart", "max_restarts", "autostart", "stop_timeout", "url"}
+	"encoding", "depends_on", "ready", "restart", "max_restarts", "autostart", "stop_timeout", "url", "changes"}
 
 func loadDoc(path string) (*yaml.Node, *yaml.Node, error) {
 	doc, root, err := loadRoot(path)
@@ -283,6 +285,11 @@ func applySpec(m *yaml.Node, s ServiceSpec) {
 	}
 	setKey(m, "stop_timeout", strOrNil(s.StopTimeout))
 	setKey(m, "url", strOrNil(s.URL))
+	if s.NoChanges {
+		setKey(m, "changes", boolNode(false))
+	} else {
+		setKey(m, "changes", nil)
+	}
 }
 
 func boolNode(v bool) *yaml.Node {
@@ -435,6 +442,7 @@ func ReadSpec(path, name string) (ServiceSpec, error) {
 		Shell: r.Shell, Runtime: r.Runtime, EnvFile: r.EnvFile, Encoding: r.Encoding,
 		DependsOn: r.DependsOn, Restart: r.Restart, MaxRestarts: r.MaxRestarts,
 		Autostart: r.Autostart, StopTimeout: r.StopTimeout, URL: r.URL,
+		NoChanges: r.Changes != nil && !*r.Changes,
 	}
 	if r.Ready != nil {
 		s.ReadyPort, s.ReadyLog, s.ReadyTimeout = r.Ready.Port, r.Ready.Log, r.Ready.Timeout

@@ -755,6 +755,10 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
                 <input type="checkbox" checked={spec.autostart} onChange={(e) => set('autostart', e.target.checked)} />
                 <span>Start automatically when The Grid starts</span>
               </label>
+              <label className="check" title="Services that share a working directory are one project in Changes: unticking this on any of them hides it">
+                <input type="checkbox" checked={!spec.noChanges} onChange={(e) => set('noChanges', !e.target.checked)} />
+                <span>Show this project in Changes</span>
+              </label>
             </section>
 
             <details className="form-section">
