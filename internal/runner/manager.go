@@ -220,6 +220,30 @@ func (m *Manager) Reload() error {
 	return nil
 }
 
+// Switch replaces the whole workspace: every running service of the current
+// one is stopped, then the config at path is loaded in its place. If the new
+// config fails to load nothing changes.
+func (m *Manager) Switch(path string) error {
+	cfg, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	old := m.services
+	m.services, m.byName = nil, map[string]*Service{}
+	for _, sc := range cfg.Services {
+		s := newService(m, sc)
+		m.services = append(m.services, s)
+		m.byName[sc.Name] = s
+	}
+	m.cfg = cfg
+	m.mu.Unlock()
+	stopAll(old)
+	st := m.State()
+	m.Hub.Publish(Event{Type: "snapshot", State: &st})
+	return nil
+}
+
 // environ builds the child environment: OS env < global env < env files < service env.
 func (m *Manager) environ(sc config.Service) ([]string, error) {
 	m.mu.RLock()

@@ -175,6 +175,13 @@ export const FolderIcon = ({ size }: P) => (
   </Svg>
 )
 
+export const FileIcon = ({ size }: P) => (
+  <Svg size={size}>
+    <path d="M6 3h8l4 4v13.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-17A.5.5 0 0 1 6.5 3z" />
+    <path d="M14 3v4h4M9 12h6M9 16h6" />
+  </Svg>
+)
+
 export const SpringIcon = ({ size }: P) => (
   <Svg size={size}>
     <path d="M20 4c-9 0-15 4.5-15 11a5 5 0 0 0 .6 2.4" />

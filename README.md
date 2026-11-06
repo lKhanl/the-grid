@@ -42,8 +42,11 @@ need 3–4 APIs, UIs and scripts running side by side with their logs one click 
 ```sh
 cp grid.example.yaml grid.yaml   # or start empty and add services in the UI
 go build -o grid .               # Windows: go build -o grid.exe .
-./grid                           # opens http://localhost:7070
+./grid -c grid.yaml              # opens http://localhost:7070
 ```
+
+Grid remembers the workspaces you open in `~/.grid/state.json` (override with `$GRID_HOME`).
+Without `-c` it reopens the last one; switch workspaces from the name next to the logo.
 
 The UI is prebuilt in `web/dist` and Go deps are vendored, so building only needs Go —
 no npm or internet access.
@@ -111,7 +114,7 @@ Deep links: `http://localhost:7070/#new`, `#new=<group>`, `#new-dir=<folder>`, `
 ## CLI
 
 ```
-grid [serve] [-c grid.yaml] [-p 7070] [--no-browser]
+grid [serve] [-c file] [-p 7070] [--no-browser]
 grid status [--json]
 grid start|stop|restart|clear <service|group|all>
 grid logs <service> [-n 200] [-f] [--raw]

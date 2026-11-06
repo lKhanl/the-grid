@@ -329,6 +329,8 @@ export interface DirListing {
   path: string
   parent?: string
   dirs: { name: string; kind?: 'maven' | 'node' }[]
+  /** *.yml / *.yaml files in this folder */
+  files?: string[]
   roots?: string[]
   error?: string
 }
@@ -432,4 +434,26 @@ export async function gitChanges(): Promise<{ projects: GitProject[]; error?: st
 
 export async function gitDiff(repo: string, path: string): Promise<GitDiff> {
   return (await check(await fetch(`/api/git/diff?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(path)}`))).json()
+}
+
+// ---- workspaces ----
+
+export interface Workspace {
+  path: string
+  name?: string
+  lastOpened: number
+}
+
+export async function listWorkspaces(): Promise<{ current: string; workspaces: Workspace[] }> {
+  return (await check(await fetch('/api/workspaces'))).json()
+}
+
+/** Switch to a grid.yaml (or a folder containing one). Stops the current workspace's services. */
+export async function openWorkspace(path: string): Promise<State> {
+  const r = await fetch('/api/workspaces/open', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ path }) })
+  return (await check(r)).json()
+}
+
+export async function forgetWorkspace(path: string) {
+  await check(await fetch(`/api/workspaces?path=${encodeURIComponent(path)}`, { method: 'DELETE', headers: HEADERS }))
 }

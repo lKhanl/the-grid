@@ -393,6 +393,7 @@ type Listing struct {
 	Path   string   `json:"path"`
 	Parent string   `json:"parent,omitempty"`
 	Dirs   []Entry  `json:"dirs"`
+	Files  []string `json:"files"`           // *.yml / *.yaml in dir, for picking a config file
 	Roots  []string `json:"roots,omitempty"` // drive letters on Windows
 	Error  string   `json:"error,omitempty"`
 }
@@ -401,7 +402,7 @@ var skipDirs = map[string]bool{"node_modules": true, "target": true, "build": tr
 
 // List returns the sub-folders of dir, marking Maven and Node projects.
 func List(dir string) Listing {
-	l := Listing{Path: dir, Dirs: []Entry{}, Roots: roots()}
+	l := Listing{Path: dir, Dirs: []Entry{}, Files: []string{}, Roots: roots()}
 	if parent := filepath.Dir(dir); parent != dir {
 		l.Parent = parent
 	}
@@ -412,6 +413,12 @@ func List(dir string) Listing {
 	}
 	for _, e := range entries {
 		n := e.Name()
+		if ext := strings.ToLower(filepath.Ext(n)); !e.IsDir() && (ext == ".yml" || ext == ".yaml") && !strings.HasPrefix(n, ".") {
+			if e.Type().IsRegular() || e.Type()&os.ModeSymlink != 0 {
+				l.Files = append(l.Files, n)
+			}
+			continue
+		}
 		if !e.IsDir() || strings.HasPrefix(n, ".") || strings.HasPrefix(n, "$") || skipDirs[n] {
 			continue
 		}
@@ -425,6 +432,7 @@ func List(dir string) Listing {
 		}
 		l.Dirs = append(l.Dirs, en)
 	}
+	sort.Slice(l.Files, func(i, j int) bool { return strings.ToLower(l.Files[i]) < strings.ToLower(l.Files[j]) })
 	sort.Slice(l.Dirs, func(i, j int) bool { return strings.ToLower(l.Dirs[i].Name) < strings.ToLower(l.Dirs[j].Name) })
 	return l
 }

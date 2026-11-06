@@ -27,6 +27,7 @@ import (
 	"github.com/lKhanl/the-grid/internal/mcp"
 	"github.com/lKhanl/the-grid/internal/runner"
 	"github.com/lKhanl/the-grid/internal/server"
+	"github.com/lKhanl/the-grid/internal/state"
 	"github.com/lKhanl/the-grid/internal/term"
 	"github.com/lKhanl/the-grid/web"
 )
@@ -36,7 +37,7 @@ const defaultPort = 7070
 const usage = `The Grid %s
 
 Usage:
-  grid [serve] [-c grid.yaml] [-p 7070] [--no-browser]
+  grid [serve] [-c file] [-p 7070] [--no-browser]
   grid status                  list services and their state     (alias: programs)
   grid start   <target>        target = service, group or "all"  (alias: rez)
   grid stop    <target>                                          (alias: derezz)
@@ -109,7 +110,7 @@ func envPort() int {
 
 func serve(args []string) error {
 	fset := flag.NewFlagSet("serve", flag.ExitOnError)
-	cfgPath := fset.String("c", "grid.yaml", "config file")
+	cfgPath := fset.String("c", "", "config file (default: the last opened workspace)")
 	port := fset.Int("p", envPort(), "HTTP port (listens on 127.0.0.1 only)")
 	noBrowser := fset.Bool("no-browser", false, "do not open the browser")
 	fset.Parse(args)
@@ -117,12 +118,21 @@ func serve(args []string) error {
 		*cfgPath = fset.Arg(0)
 	}
 
-	cfg, err := config.Load(*cfgPath)
+	store, err := state.Open()
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("%v\ncreate a grid.yaml (see grid.example.yaml) or pass -c <file>", err)
-		}
+		fmt.Fprintln(os.Stderr, "warning: no ~/.grid state (recent workspaces disabled):", err)
+		store = nil
+	}
+	path, err := pickWorkspace(*cfgPath, store)
+	if err != nil {
 		return err
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	if store != nil {
+		store.Touch(cfg.Path, cfg.Name)
 	}
 	runner.Version = version
 	m := runner.NewManager(cfg)
@@ -137,7 +147,7 @@ func serve(args []string) error {
 	}
 	var terms *term.Manager
 	terms = term.NewManager(func() { m.Hub.Publish(runner.Event{Type: "terms", Terms: terms.List()}) })
-	srv := &http.Server{Handler: server.New(m, terms, ui), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: server.New(m, terms, store, ui), ReadHeaderTimeout: 10 * time.Second}
 	url := fmt.Sprintf("http://localhost:%d", *port)
 	fmt.Printf("THE GRID %s\n  config : %s\n  ui     : %s\n  %d programs on the grid. Ctrl+C: end of line (stops everything).\n",
 		version, cfg.Path, url, len(cfg.Services))
@@ -164,6 +174,20 @@ func serve(args []string) error {
 	defer cancel()
 	srv.Shutdown(ctx)
 	return nil
+}
+
+// pickWorkspace decides which grid.yaml to start with: an explicit -c wins,
+// then the last workspace opened (remembered in ~/.grid).
+func pickWorkspace(explicit string, store *state.Store) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	if store != nil {
+		if p, ok := store.Last(); ok {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("no previously opened workspace\nstart with: grid -c <grid.yaml> (see grid.example.yaml)")
 }
 
 func openBrowser(url string) {

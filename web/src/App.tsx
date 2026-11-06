@@ -4,6 +4,7 @@ import { LogView } from './LogView'
 import { ChangesIcon, ChevronIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, JarIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon, TerminalIcon } from './icons'
 import { ServiceForm } from './ServiceForm'
 import { RuntimeForm } from './RuntimeForm'
+import { Workspaces } from './Workspaces'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
 import { NeonBorder } from './NeonBorder'
 import { applyTheme, loadTheme, type Theme } from './theme'
@@ -98,6 +99,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [unread, setUnread] = useState<Record<string, 'out' | 'err'>>({})
   const [form, setForm] = useState<{ editing: string | null; group?: string; cwd?: string } | null>(null)
+  const [wsOpen, setWsOpen] = useState(false)
   const [rtForm, setRtForm] = useState<{ editing: string | null } | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; service: string } | null>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
@@ -375,7 +377,16 @@ export default function App() {
               v{state.version.split('+')[0]}
             </span>
           )}
-          {state?.name && <span className="workspace">{state.name}</span>}
+          {state && (
+            <button
+              className="workspace"
+              style={{ background: 'none', border: 0, borderLeft: '1px solid var(--border)', cursor: 'pointer' }}
+              title={`${state.configPath}\nSwitch workspace`}
+              onClick={() => setWsOpen(true)}
+            >
+              {state.name || 'workspace'} ▾
+            </button>
+          )}
         </div>
         <div className="summary">
           {runningCount}/{services.length} on the grid
@@ -835,6 +846,17 @@ export default function App() {
         ]
         return <ContextMenu x={menu.x} y={menu.y} title={s.name} items={items} onClose={closeMenu} />
       })()}
+      {wsOpen && state && (
+        <Workspaces
+          current={state.configPath}
+          onClose={() => setWsOpen(false)}
+          onSwitched={(st) => {
+            for (const s of st.services) store.set(s.name, [])
+            setState(st)
+            setSelected(st.services[0]?.name ?? null)
+          }}
+        />
+      )}
       {rtForm && state && <RuntimeForm state={state} editing={rtForm.editing} onClose={() => setRtForm(null)} onDone={() => setRtForm(null)} />}
     </div>
   )
