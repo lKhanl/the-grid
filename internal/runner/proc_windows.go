@@ -70,6 +70,9 @@ type proc struct {
 }
 
 func shellKind(shell string) string {
+	if strings.TrimSpace(shell) == "" {
+		return "cmd" // default shell; don't rely on filepath.Base("")
+	}
 	base := strings.ToLower(strings.TrimSuffix(filepath.Base(shell), filepath.Ext(shell)))
 	switch base {
 	case "", "cmd":
@@ -78,6 +81,22 @@ func shellKind(shell string) string {
 		return "powershell"
 	}
 	return "posix"
+}
+
+// newCmd builds the Cmd with an explicit Path, so a locked-down machine
+// (no COMSPEC, odd PATH) can't leave Path empty ("exec: no command").
+func newCmd(exe string, args ...string) *exec.Cmd {
+	path := exe
+	if !strings.ContainsAny(exe, `\/`) {
+		if lp, err := exec.LookPath(exe); err == nil && lp != "" {
+			path = lp
+		} else if root := os.Getenv("SystemRoot"); root != "" && strings.EqualFold(exe, "cmd.exe") {
+			path = filepath.Join(root, "System32", "cmd.exe")
+		} else if strings.EqualFold(exe, "cmd.exe") {
+			path = `C:\Windows\System32\cmd.exe`
+		}
+	}
+	return &exec.Cmd{Path: path, Args: append([]string{exe}, args...)}
 }
 
 func buildCmd(shell, command string) *exec.Cmd {
@@ -90,7 +109,7 @@ func buildCmd(shell, command string) *exec.Cmd {
 				exe = "cmd.exe"
 			}
 		}
-		c = exec.Command(exe)
+		c = newCmd(exe)
 		// Raw command line: cmd.exe has its own quoting rules, Go's escaping would break them.
 		c.SysProcAttr = &syscall.SysProcAttr{CmdLine: `"` + exe + `" /d /s /c "` + command + `"`}
 	case "powershell":
@@ -98,10 +117,10 @@ func buildCmd(shell, command string) *exec.Cmd {
 		if strings.EqualFold(exe, "powershell") || strings.EqualFold(exe, "pwsh") {
 			exe += ".exe"
 		}
-		c = exec.Command(exe, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command)
+		c = newCmd(exe, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command)
 		c.SysProcAttr = &syscall.SysProcAttr{}
 	default: // bash / sh (e.g. Git Bash)
-		c = exec.Command(shell, "-c", command)
+		c = newCmd(shell, "-c", command)
 		c.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	// Suspended so the process can be put into the job before it spawns children.
@@ -128,7 +147,7 @@ func newKillOnCloseJob() (syscall.Handle, error) {
 
 func startProc(c *exec.Cmd) (*proc, error) {
 	if err := c.Start(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w [path=%q args=%q dir=%q]", err, c.Path, c.Args, c.Dir)
 	}
 	p := &proc{pid: c.Process.Pid}
 	h, err := syscall.OpenProcess(processTerminate|processSetQuota|processSuspendResume, false, uint32(p.pid))
