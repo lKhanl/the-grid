@@ -13,6 +13,9 @@ import { DbForm, DbSidebar, DbWorkbench, useDatabase } from './Database'
 import { loadPrefs, TermPanel, type NewTermPrefs } from './Terminals'
 
 const ACTIVE = new Set(['starting', 'building', 'running', 'stopping'])
+const SIDE_MIN = 220
+const SIDE_DEFAULT = 330
+
 type Panel = 'services' | 'changes' | 'database' | 'runtimes' | 'settings'
 
 const SHORTCUTS: [string, [string[], string][]][] = [
@@ -146,6 +149,33 @@ export default function App() {
     const p = localStorage.getItem('grid.panel')
     return p === 'runtimes' || p === 'settings' || p === 'changes' || p === 'database' ? p : 'services'
   })
+  const [sideW, setSideW] = useState(() => {
+    const n = Number(localStorage.getItem('grid.sideW'))
+    return n >= SIDE_MIN && n <= 900 ? n : SIDE_DEFAULT
+  })
+  const [sideDrag, setSideDrag] = useState(false)
+  const dragSide = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const el = e.currentTarget
+    el.setPointerCapture(e.pointerId)
+    setSideDrag(true)
+    const left = (el.previousElementSibling as HTMLElement).getBoundingClientRect().left
+    let w = sideW
+    const move = (ev: PointerEvent) => {
+      w = Math.round(Math.max(SIDE_MIN, Math.min(window.innerWidth * 0.6, ev.clientX - left)))
+      setSideW(w)
+    }
+    const up = () => {
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', up)
+      el.removeEventListener('pointercancel', up)
+      setSideDrag(false)
+      localStorage.setItem('grid.sideW', String(w))
+    }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', up)
+    el.addEventListener('pointercancel', up)
+  }
   const git = useGit(panel === 'changes')
   const dbs = useDatabase(panel === 'database')
   const [terms, setTerms] = useState<TermInfo[]>([])
@@ -430,6 +460,8 @@ export default function App() {
         </div>
         <div className="spacer" />
         {!connected && <div className="offline">disconnected, retrying…</div>}
+        {panel === 'services' && (
+          <>
         <Btn icon={<PlayIcon />} label="Start all" title="Start all" kind="text green" onClick={() => run('all', 'start')} />
         <Btn icon={<StopIcon />} label="Stop all" title="End of line: stop every program" kind="text red" onClick={() => run('all', 'stop')} />
         <Btn
@@ -439,6 +471,8 @@ export default function App() {
           kind="text"
           onClick={() => reload().catch((e) => setError(`reload: ${e.message}`))}
         />
+          </>
+        )}
       </header>
       {error && (
         <div className="error" onClick={() => setError(null)}>
@@ -506,7 +540,7 @@ export default function App() {
             <span className="activity-tip">Settings</span>
           </button>
         </nav>
-        <aside className="sidebar">
+        <aside className="sidebar" style={{ width: sideW }}>
           {panel === 'services' ? (
             <>
           <div className="sidebar-head divided">
@@ -762,7 +796,7 @@ export default function App() {
                 )
               })}
               {state && state.runtimes.length === 0 && (
-                <div className="empty">
+                <div className="empty rt-empty">
                   No runtimes yet.
                   <Btn icon={<PlusIcon size={14} />} label="Add a runtime" title="New runtime" kind="text" onClick={() => setRtForm({ editing: null })} />
                 </div>
@@ -770,10 +804,19 @@ export default function App() {
             </>
           )}
         </aside>
+        <div
+          className={`side-resizer ${sideDrag ? 'dragging' : ''}`}
+          onPointerDown={dragSide}
+          onDoubleClick={() => {
+            setSideW(SIDE_DEFAULT)
+            localStorage.removeItem('grid.sideW')
+          }}
+          title="Drag to resize, double-click to reset"
+        />
         <section className="detail">
           {panel === 'changes' && !(termOpen && termMax) && <DiffPane git={git} />}
           {panel === 'database' && !(termOpen && termMax) && <DbWorkbench dbs={dbs} />}
-          <div className="detail-pane" style={{ display: (termOpen && termMax) || panel === 'changes' || panel === 'database' ? 'none' : 'flex' }}>
+          <div className="detail-pane" style={{ display: (termOpen && termMax) || panel === 'changes' || panel === 'database' || panel === 'runtimes' ? 'none' : 'flex' }}>
           {current ? (
             <div className="toolbar">
               <StatusIcon status={current.status} type={current.type} size={18} />

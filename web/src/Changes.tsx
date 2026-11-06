@@ -1,4 +1,5 @@
-import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
+import { isYaml, langOf, tokenize, tokenizeMarkup, tokenizeYaml, type Tok } from './highlight'
 import { gitChanges, gitDiff, type GitDiff, type GitFile, type GitProject } from './api'
 import { ChevronIcon, FolderIcon, ReloadIcon } from './icons'
 
@@ -232,6 +233,7 @@ interface Line {
   text: string
   o?: number // line number in the old file
   n?: number // line number in the new file
+  toks?: Tok[] // coloured pieces of text (absent: plain)
 }
 interface Hunk {
   header: string
@@ -286,6 +288,53 @@ function pairs(lines: Line[]): Pair[] {
   return rows
 }
 
+// ---- syntax colour ----
+
+const MAX_COLOUR_LINES = 4000 // beyond this a diff is shown plain: colouring must never slow the page
+const MAX_COLOUR_LEN = 600 // minified / generated lines stay plain
+
+/** Colours every line, following block comments through the old and the new side separately. */
+function colorize(hunks: Hunk[], path: string) {
+  const lang = langOf(path)
+  if (!lang || hunks.reduce((n, h) => n + h.lines.length, 0) > MAX_COLOUR_LINES) return
+  const one = (text: string, inBlock: boolean) => {
+    if (lang.markup) return tokenizeMarkup(text, lang, inBlock)
+    if (isYaml(lang)) return { toks: tokenizeYaml(text, lang), inBlock: false }
+    return tokenize(text, lang, inBlock)
+  }
+  for (const h of hunks) {
+    // a hunk that starts in the middle of a /* ... */ comment: " * text" or " */"
+    const first = h.lines[0]?.text ?? ''
+    let oldIn = /^\s*\*(?!\/)|^\s*\*\//.test(first) && !isYaml(lang)
+    let newIn = oldIn
+    for (const l of h.lines) {
+      if (l.text.length > MAX_COLOUR_LEN) continue
+      if (l.kind === '-') {
+        const r = one(l.text, oldIn)
+        l.toks = r.toks
+        oldIn = r.inBlock
+      } else if (l.kind === '+') {
+        const r = one(l.text, newIn)
+        l.toks = r.toks
+        newIn = r.inBlock
+      } else {
+        const r = one(l.text, newIn)
+        l.toks = r.toks
+        oldIn = newIn = r.inBlock
+      }
+    }
+  }
+}
+
+function Code({ l }: { l: Line }) {
+  if (!l.toks) return <>{l.text}</>
+  return (
+    <>
+      {l.toks.map((t, i) => (typeof t === 'string' ? t : <span key={i} className={`tk-${t[0]}`}>{t[1]}</span>))}
+    </>
+  )
+}
+
 // ---- diff pane ----
 
 export type DiffMode = 'split' | 'unified'
@@ -316,7 +365,11 @@ export function DiffPane({ git }: { git: GitState }) {
     }
   }, [repo, file, stamp])
 
-  const hunks = diff ? parseDiff(diff.diff) : []
+  const hunks = useMemo(() => {
+    const h = diff ? parseDiff(diff.diff) : []
+    if (file) colorize(h, file)
+    return h
+  }, [diff, file])
   const [dir, name] = split(file ?? '')
   return (
     <div className="detail-pane diff-pane">
@@ -366,9 +419,9 @@ export function DiffPane({ git }: { git: GitState }) {
                     {pairs(h.lines).map((p, k) => (
                       <tr key={k}>
                         <td className={`num ${p.l?.kind === '-' ? 'del' : ''}`}>{p.l?.o}</td>
-                        <td className={`code ${p.l ? (p.l.kind === '-' ? 'del' : '') : 'empty'}`}>{p.l?.text}</td>
+                        <td className={`code ${p.l ? (p.l.kind === '-' ? 'del' : '') : 'empty'}`}>{p.l && <Code l={p.l} />}</td>
                         <td className={`num ${p.r?.kind === '+' ? 'add' : ''}`}>{p.r?.n}</td>
-                        <td className={`code ${p.r ? (p.r.kind === '+' ? 'add' : '') : 'empty'}`}>{p.r?.text}</td>
+                        <td className={`code ${p.r ? (p.r.kind === '+' ? 'add' : '') : 'empty'}`}>{p.r && <Code l={p.r} />}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -387,7 +440,7 @@ export function DiffPane({ git }: { git: GitState }) {
                         <td className="num">{l.n}</td>
                         <td className="code">
                           <span className="sign">{l.kind === ' ' ? '' : l.kind}</span>
-                          {l.text}
+                          <Code l={l} />
                         </td>
                       </tr>
                     ))}
@@ -397,6 +450,24 @@ export function DiffPane({ git }: { git: GitState }) {
             </div>
           ))}
         {diff?.truncated && <div className="diff-note">Diff truncated (too large).</div>}
+        {hunks.length > 0 && (
+          <div className={`diff-fill ${mode}`} aria-hidden>
+            {mode === 'split' ? (
+              <>
+                <i className="num" />
+                <i />
+                <i className="num" />
+                <i />
+              </>
+            ) : (
+              <>
+                <i className="num" />
+                <i className="num" />
+                <i />
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

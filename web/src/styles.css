@@ -26,12 +26,16 @@
   --yellow: #e0b040;
   --orange: #e08855;
   /* SQL editor colours */
-  --sql-keyword: #5ee6f7;
-  --sql-string: #8bd98f;
-  --sql-number: #e0b040;
-  --sql-comment: #62747d;
-  --sql-type: #c58af9;
-  --sql-op: #93a8b1;
+  --sql-keyword: #cf8e6d;
+  --sql-string: #6aab73;
+  --sql-number: #2aacb8;
+  --sql-comment: #7a7e85;
+  --sql-type: #cf8e6d;
+  --sql-op: #bcbec4;
+  --sql-fn: #56a8f5;
+  --sql-prop: #c77dbb;
+  --sql-tag: #d5b778;
+  --sql-annot: #b3ae60;
   font-family: Inter, 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 15px;
   color: var(--text);
@@ -55,7 +59,7 @@ html, body, #root { height: 100%; margin: 0; }
 .error { background: #4a2326; color: #ffb3ad; padding: 6px 12px; cursor: pointer; border-bottom: 1px solid #6b2f33; }
 
 .main { flex: 1; display: flex; min-height: 0; }
-.sidebar { width: 330px; min-width: 200px; resize: horizontal; overflow: auto; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 6px 0; }
+.sidebar { width: 330px; min-width: 200px; flex: none; overflow: auto; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 6px 0; }
 .group { margin-bottom: 4px; }
 .group-head { display: flex; align-items: center; height: 32px; padding: 0 12px; color: var(--muted); text-transform: uppercase; font-size: 12.5px; letter-spacing: .04em; }
 .group-name { flex: 1; }
@@ -359,12 +363,16 @@ details.form-section[open] summary { margin-bottom: 10px; }
   --menu-line: #3d4046;
   --hover-border: #5a5d63;
   --link: #9db3dc;
-  --sql-keyword: #cc7832;
-  --sql-string: #6a8759;
-  --sql-number: #6897bb;
+  --sql-keyword: #cf8e6d;
+  --sql-string: #6aab73;
+  --sql-number: #2aacb8;
   --sql-comment: #7a7e85;
-  --sql-type: #ffc66d;
-  --sql-op: #a9b7c6;
+  --sql-type: #cf8e6d;
+  --sql-op: #bcbec4;
+  --sql-fn: #56a8f5;
+  --sql-prop: #c77dbb;
+  --sql-tag: #d5b778;
+  --sql-annot: #b3ae60;
 }
 [data-theme='basic'] .topbar { border-bottom-color: var(--border); box-shadow: none; }
 [data-theme='basic'] .brand-name { letter-spacing: .02em; color: var(--text); text-shadow: none; font-weight: 600; }
@@ -499,7 +507,7 @@ details.form-section[open] summary { margin-bottom: 10px; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .seg button { border: 0; background: none; color: var(--muted); padding: 5px 12px; font: inherit; font-size: 13px; cursor: pointer; }
 .seg button.on { background: var(--on); color: var(--text); }
-.diff-body { flex: 1; overflow: auto; background: var(--sunk); font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, Menlo, monospace; font-size: 13px; line-height: 1.5; }
+.diff-body { flex: 1; overflow: auto; display: flex; flex-direction: column; background: var(--sunk); font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, Menlo, monospace; font-size: 13px; line-height: 1.5; }
 .diff-note { padding: 18px 20px; color: var(--muted); font-family: inherit; }
 .hunk-head { position: sticky; top: 0; z-index: 1; padding: 3px 14px; color: var(--muted); background: var(--panel); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hunk:first-child .hunk-head { border-top: 0; }
@@ -582,3 +590,27 @@ table.diff .sign { display: inline-block; width: 1.2ch; margin-right: 1ch; color
 .db-tabs-run { padding: 0 8px 6px; align-self: center; }
 .db-tab-close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 4px; background: none; color: inherit; cursor: pointer; opacity: .55; }
 .db-tab-close:hover { opacity: 1; background: var(--hover); }
+.empty.rt-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 36px; text-align: center; }
+
+/* syntax colour in the diff view (the IntelliJ dark palette, shared with the SQL editor) */
+.tk-k { color: var(--sql-keyword); }
+.tk-s { color: var(--sql-string); }
+.tk-n { color: var(--sql-number); }
+.tk-c { color: var(--sql-comment); font-style: italic; }
+.tk-t { color: var(--sql-annot); }
+.tk-f { color: var(--sql-fn); }
+.tk-p { color: var(--sql-prop); }
+.tk-g { color: var(--sql-tag); }
+
+/* the line-number gutter runs on to the bottom of the pane, with some room under the last line */
+.diff-body > * { flex: none; }
+.diff-body > .diff-fill { flex: 1 0 48px; display: grid; }
+.diff-fill.split { grid-template-columns: 52px 1fr 52px 1fr; }
+.diff-fill.unified { grid-template-columns: 52px 52px 1fr; }
+.diff-fill > i { background: transparent; }
+.diff-fill > i.num { background: color-mix(in srgb, var(--panel) 85%, var(--sunk)); }
+.diff-fill.split > i:nth-child(2) { border-right: 1px solid var(--border); }
+
+.side-resizer { flex: none; width: 8px; margin: 0 -4px 0 -4px; cursor: col-resize; position: relative; z-index: 4; }
+.side-resizer:hover, .side-resizer.dragging { background: linear-gradient(90deg, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
+body:has(.side-resizer.dragging) { user-select: none; cursor: col-resize; }
