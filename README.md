@@ -77,7 +77,7 @@ The generated build and run commands are previewed as you edit.
 
 ## For AI agents: `grid mcp`
 
-`grid mcp` is an MCP server (stdio) with three tools, so an agent can run the
+`grid mcp` is an MCP server (stdio) with four tools, so an agent can run the
 edit → restart → read logs loop without you copy-pasting:
 
 | tool | what it does |
@@ -85,6 +85,13 @@ edit → restart → read logs loop without you copy-pasting:
 | `status` | services and their state |
 | `logs` | last N log lines of a service (colors removed) |
 | `restart` | restart / start / stop, waits until it is running or failed, returns the last log lines |
+| `wait` | keep waiting for a service that `restart` reported as still building / starting |
+
+Slow machines (a VDI building with Maven) are handled so the agent never mistakes a long build for a
+failure: `restart` waits at most 40 s by default (`grid mcp --wait 60` to change it; keep it under the
+agent's tool timeout), then answers "STILL BUILDING ... not a failure, call `wait`" and the agent calls
+`wait` instead of restarting again. While waiting it also sends MCP progress notifications, so clients
+that reset their timeout on progress keep waiting. `status` shows how long a service has been building.
 
 The Grid itself must be running (`grid`). Register it in the agent's MCP config, for example
 (OpenCode style; the key names depend on the agent):

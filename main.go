@@ -97,8 +97,13 @@ func main() {
 // mcpServe speaks MCP on stdin/stdout; stdout carries only protocol messages.
 func mcpServe(args []string) error {
 	fset, port := clientFlags("mcp", args)
+	wait := fset.Int("wait", 40, "default seconds restart/wait block before answering \"still building\" (keep it under the agent's tool timeout)")
 	fset.Parse(args)
-	return mcp.New(*port, version).Serve(os.Stdin, os.Stdout)
+	s := mcp.New(*port, version)
+	if *wait > 0 {
+		s.DefaultWait = time.Duration(*wait) * time.Second
+	}
+	return s.Serve(os.Stdin, os.Stdout)
 }
 
 func envPort() int {

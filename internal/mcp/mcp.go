@@ -28,6 +28,13 @@ type Server struct {
 	// poll interval and the grace period used to catch a crash right after "running"
 	Poll  time.Duration
 	Grace time.Duration
+	// DefaultWait is how long restart / wait block when the agent gives no `wait`.
+	// Kept under the typical 60 s tool timeout of MCP clients: a slow build (VDI)
+	// must come back as "still building", not as a timeout the agent reads as a failure.
+	DefaultWait time.Duration
+	// Progress is how often a progress notification is sent while waiting
+	// (clients that reset their timeout on progress then never give up).
+	Progress time.Duration
 }
 
 func New(port int, version string) *Server {
@@ -37,6 +44,9 @@ func New(port int, version string) *Server {
 		Client:  &http.Client{Timeout: 30 * time.Second},
 		Poll:    500 * time.Millisecond,
 		Grace:   3 * time.Second,
+
+		DefaultWait: 40 * time.Second,
+		Progress:    3 * time.Second,
 	}
 }
 
@@ -62,11 +72,14 @@ type rpcError struct {
 // Serve reads requests from in until it closes and writes responses to out.
 func (s *Server) Serve(in io.Reader, out io.Writer) error {
 	var mu sync.Mutex
-	write := func(r response) {
-		b, _ := json.Marshal(r)
+	write := func(v any) {
+		b, _ := json.Marshal(v)
 		mu.Lock()
 		defer mu.Unlock()
 		out.Write(append(b, '\n'))
+	}
+	notify := func(method string, params any) {
+		write(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
 	}
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
@@ -88,7 +101,7 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res, rerr := s.handle(req)
+			res, rerr := s.handle(req, notify)
 			r := response{JSONRPC: "2.0", ID: req.ID, Result: res, Error: rerr}
 			if rerr == nil && res == nil {
 				r.Result = map[string]any{}
@@ -100,7 +113,7 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 	return sc.Err()
 }
 
-func (s *Server) handle(req request) (any, *rpcError) {
+func (s *Server) handle(req request, notify func(string, any)) (any, *rpcError) {
 	switch req.Method {
 	case "initialize":
 		var p struct {
@@ -114,7 +127,7 @@ func (s *Server) handle(req request) (any, *rpcError) {
 			"protocolVersion": p.ProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "grid", "version": s.Version},
-			"instructions":    "Controls the services of The Grid. Use restart after changing a service's code, then read the log tail it returns.",
+			"instructions":    "Controls the services of The Grid. Use restart after changing a service's code, then read the log tail it returns. Builds can be slow: if restart says the service is still building or starting, that is NOT a failure; call wait (never restart again) until it is running.",
 		}, nil
 	case "ping":
 		return map[string]any{}, nil
@@ -124,11 +137,22 @@ func (s *Server) handle(req request) (any, *rpcError) {
 		var p struct {
 			Name      string         `json:"name"`
 			Arguments map[string]any `json:"arguments"`
+			Meta      struct {
+				ProgressToken json.RawMessage `json:"progressToken"`
+			} `json:"_meta"`
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, &rpcError{-32602, "bad params"}
 		}
-		text, err := s.call(p.Name, p.Arguments)
+		var progress func(string)
+		if len(p.Meta.ProgressToken) > 0 && string(p.Meta.ProgressToken) != "null" {
+			n := 0
+			progress = func(msg string) {
+				n++
+				notify("notifications/progress", map[string]any{"progressToken": p.Meta.ProgressToken, "progress": n, "message": msg})
+			}
+		}
+		text, err := s.call(p.Name, p.Arguments, progress)
 		if err != nil {
 			return toolResult(err.Error(), true), nil
 		}
@@ -161,20 +185,32 @@ var tools = []map[string]any{
 	},
 	{
 		"name":        "restart",
-		"description": "Restart a service (or start / stop it), wait until it is running or has failed, and return the result with the last log lines. Use after changing code.",
+		"description": "Restart a service (or start / stop it), wait until it is running or has failed, and return the result with the last log lines. Use after changing code. Slow builds: if the answer says STILL BUILDING / STARTING, it is not a failure; call wait, do not restart again.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"service": map[string]any{"type": "string", "description": "service name, see status"},
 				"action":  map[string]any{"type": "string", "enum": []string{"restart", "start", "stop"}, "description": "default restart"},
-				"wait":    map[string]any{"type": "integer", "description": "max seconds to wait (default 90)"},
+				"wait":    map[string]any{"type": "integer", "description": "max seconds to wait (default 40)"},
+			},
+			"required": []string{"service"},
+		},
+	},
+	{
+		"name":        "wait",
+		"description": "Keep waiting for a service that restart reported as still building or starting. Returns when it is running or has failed, with the last log lines.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"service": map[string]any{"type": "string", "description": "service name, see status"},
+				"wait":    map[string]any{"type": "integer", "description": "max seconds to wait (default 40)"},
 			},
 			"required": []string{"service"},
 		},
 	},
 }
 
-func (s *Server) call(name string, args map[string]any) (string, error) {
+func (s *Server) call(name string, args map[string]any, progress func(string)) (string, error) {
 	switch name {
 	case "status":
 		return s.status()
@@ -187,9 +223,20 @@ func (s *Server) call(name string, args map[string]any) (string, error) {
 		if action == "" {
 			action = "restart"
 		}
-		return s.restart(svc, action, intArg(args, "wait", 90, 1, 600))
+		return s.restart(svc, action, s.waitArg(args), progress)
+	case "wait":
+		svc, _ := args["service"].(string)
+		return s.waitTool(svc, s.waitArg(args), progress)
 	}
 	return "", fmt.Errorf("unknown tool %q", name)
+}
+
+// waitArg is the wait budget: the agent's `wait` seconds, else DefaultWait.
+func (s *Server) waitArg(args map[string]any) time.Duration {
+	if _, ok := args["wait"]; !ok {
+		return s.DefaultWait
+	}
+	return time.Duration(intArg(args, "wait", int(s.DefaultWait/time.Second), 1, 600)) * time.Second
 }
 
 func intArg(args map[string]any, key string, def, min, max int) int {
@@ -281,6 +328,9 @@ func (s *Server) status() (string, error) {
 	var b strings.Builder
 	for _, v := range list {
 		fmt.Fprintf(&b, "%s: %s", v.Name, label(v))
+		if inProgress(v.Status) && v.StartedAt > 0 {
+			fmt.Fprintf(&b, " (for %ds)", int(time.Since(time.UnixMilli(v.StartedAt)).Seconds()))
+		}
 		if v.Type != "" && v.Type != "custom" {
 			fmt.Fprintf(&b, " [%s]", v.Type)
 		}
@@ -290,6 +340,10 @@ func (s *Server) status() (string, error) {
 		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+func inProgress(status string) bool {
+	return status == "starting" || status == "building"
 }
 
 func label(v info) string {
@@ -337,7 +391,7 @@ func (s *Server) logs(service string, n int) (string, error) {
 	return text, nil
 }
 
-func (s *Server) restart(service, action string, wait int) (string, error) {
+func (s *Server) restart(service, action string, wait time.Duration, progress func(string)) (string, error) {
 	switch action {
 	case "restart", "start", "stop":
 	default:
@@ -350,10 +404,23 @@ func (s *Server) restart(service, action string, wait int) (string, error) {
 	if _, err := s.do("POST", fmt.Sprintf("/api/do/%s/%s", url.PathEscape(service), action)); err != nil {
 		return "", err
 	}
-	final, outcome := s.waitFor(service, action, before.StartedAt, time.Duration(wait)*time.Second)
+	return s.report(service, action, before.StartedAt, wait, progress), nil
+}
+
+// waitTool keeps waiting for a service that is already starting (after restart timed out).
+func (s *Server) waitTool(service string, wait time.Duration, progress func(string)) (string, error) {
+	cur, err := s.find(service)
+	if err != nil {
+		return "", err
+	}
+	return s.report(service, "wait", cur.StartedAt, wait, progress), nil
+}
+
+func (s *Server) report(service, action string, oldStart int64, wait time.Duration, progress func(string)) string {
+	final, outcome := s.waitFor(service, action, oldStart, wait, progress)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: %s", service, outcome)
-	if final != nil {
+	if final != nil && !inProgress(final.Status) {
 		fmt.Fprintf(&b, " (status: %s)", label(*final))
 	}
 	if action != "stop" {
@@ -361,14 +428,16 @@ func (s *Server) restart(service, action string, wait int) (string, error) {
 			b.WriteString("\n--- last log lines ---\n" + t)
 		}
 	}
-	return b.String(), nil
+	return b.String()
 }
 
 // waitFor polls until the service is up, has failed, or the time is over.
-func (s *Server) waitFor(service, action string, oldStart int64, max time.Duration) (*info, string) {
-	deadline := time.Now().Add(max)
+func (s *Server) waitFor(service, action string, oldStart int64, max time.Duration, progress func(string)) (*info, string) {
+	start := time.Now()
+	deadline := start.Add(max)
 	time.Sleep(s.Poll) // let the action take effect before reading the state
 	var runningSince time.Time
+	var lastProgress time.Time
 	for {
 		cur, err := s.find(service)
 		if err != nil {
@@ -384,7 +453,7 @@ func (s *Server) waitFor(service, action string, oldStart int64, max time.Durati
 			if action == "stop" {
 				break
 			}
-			if cur.StartedAt != oldStart || action == "start" {
+			if cur.StartedAt != oldStart || action != "restart" {
 				// no readiness check means "running" starts at once: wait a bit to catch an early crash
 				if runningSince.IsZero() {
 					runningSince = time.Now()
@@ -395,7 +464,16 @@ func (s *Server) waitFor(service, action string, oldStart int64, max time.Durati
 			}
 		}
 		if time.Now().After(deadline) {
-			return cur, fmt.Sprintf("still not ready after %ds", int(max/time.Second))
+			secs := int(time.Since(start).Round(time.Second) / time.Second)
+			if inProgress(cur.Status) {
+				return cur, fmt.Sprintf("STILL %s after %ds. This is NOT a failure, the service is just slow. Call the wait tool to keep waiting; do not restart it again.",
+					strings.ToUpper(cur.Status), secs)
+			}
+			return cur, fmt.Sprintf("not ready after %ds", secs)
+		}
+		if progress != nil && time.Since(lastProgress) >= s.Progress {
+			lastProgress = time.Now()
+			progress(fmt.Sprintf("%s: %s, %ds", service, cur.Status, int(time.Since(start)/time.Second)))
 		}
 		time.Sleep(s.Poll)
 	}
