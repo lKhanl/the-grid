@@ -21,6 +21,7 @@ const (
 	TypeSpring = "spring-boot"
 	TypeNode   = "node"
 	TypeScript = "script"
+	TypeJar    = "jar"
 )
 
 // SpringOpts configures a Spring Boot (Maven) service.
@@ -46,6 +47,13 @@ type NodeOpts struct {
 type ScriptOpts struct {
 	File string `yaml:"file"`
 	Args string `yaml:"args"`
+}
+
+// JarOpts configures a plain jar application (no build step).
+type JarOpts struct {
+	File    string `yaml:"file"`     // path to the jar (relative to cwd); may contain * wildcards
+	JvmArgs string `yaml:"jvm_args"` // e.g. -Xmx1g -Dfoo=bar
+	Args    string `yaml:"args"`     // program arguments
 }
 
 // Plan is what the runner executes for one start.
@@ -104,8 +112,12 @@ func normalizeType(s *Service) error {
 		if s.Script == nil || strings.TrimSpace(s.Script.File) == "" {
 			return fmt.Errorf("'script.file' is required")
 		}
+	case TypeJar:
+		if s.Jar == nil || strings.TrimSpace(s.Jar.File) == "" {
+			return fmt.Errorf("'jar.file' is required")
+		}
 	default:
-		return fmt.Errorf("unknown type %q (use spring-boot, node, script or custom)", s.Type)
+		return fmt.Errorf("unknown type %q (use spring-boot, node, script, jar or custom)", s.Type)
 	}
 	return nil
 }
@@ -129,6 +141,8 @@ func (s *Service) plan(skipBuild, check bool) *Plan {
 		p = s.nodePlan(check && !skipBuild)
 	case TypeScript:
 		p = s.scriptPlan()
+	case TypeJar:
+		p = s.jarPlan()
 	default:
 		cmd, cwd := s.Command, s.Cwd
 		p = &Plan{RunPreview: cmd, Run: func() (string, string, error) { return cmd, cwd, nil }}
@@ -368,4 +382,42 @@ func (s *Service) scriptPlan() *Plan {
 		}
 		return cmd, dir, nil
 	}}
+}
+
+// ---- jar ----
+
+// jarPlan runs an already built jar: java <jvm_args> -jar <file> <args>.
+func (s *Service) jarPlan() *Plan {
+	o, dir := s.Jar, s.Cwd
+	pattern := o.File
+	if !filepath.IsAbs(pattern) {
+		pattern = filepath.Join(dir, filepath.FromSlash(pattern))
+	}
+	runFor := func(jar string) string { return join("java", o.JvmArgs, "-jar", quote(jar), o.Args) }
+	return &Plan{
+		RunPreview: runFor(o.File),
+		Run: func() (string, string, error) {
+			jar := pattern
+			if strings.ContainsAny(pattern, "*?[") {
+				matches, _ := filepath.Glob(pattern)
+				jar = newestFile(matches)
+				if jar == "" {
+					return "", "", fmt.Errorf("no jar matches %s", pattern)
+				}
+			} else if !fileExists(jar) {
+				return "", "", fmt.Errorf("jar %s not found", jar)
+			}
+			return runFor(jar), dir, nil
+		},
+	}
+}
+
+func newestFile(paths []string) string {
+	best, bestMod := "", int64(-1)
+	for _, p := range paths {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() && info.ModTime().UnixNano() > bestMod {
+			best, bestMod = p, info.ModTime().UnixNano()
+		}
+	}
+	return best
 }

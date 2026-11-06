@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { act, closeTerm, deleteService, openTerm, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State, type TermInfo } from './api'
 import { LogView } from './LogView'
-import { ChevronIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon, TerminalIcon } from './icons'
+import { ChevronIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, JarIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon, TerminalIcon } from './icons'
 import { ServiceForm } from './ServiceForm'
 import { RuntimeForm } from './RuntimeForm'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
@@ -59,7 +59,7 @@ function useTick(ms: number) {
   }, [ms])
 }
 
-const TYPE_ICONS = { 'spring-boot': SpringIcon, node: NodeIcon, script: ScriptIcon, custom: CodeIcon } as const
+const TYPE_ICONS = { 'spring-boot': SpringIcon, node: NodeIcon, script: ScriptIcon, jar: JarIcon, custom: CodeIcon } as const
 
 /** Service type icon, colored by status. */
 function StatusIcon({ status, type, size = 16 }: { status: Info['status']; type: Info['type']; size?: number }) {

@@ -47,6 +47,12 @@ type ScriptSpec struct {
 	Args string `json:"args"`
 }
 
+type JarSpec struct {
+	File    string `json:"file"`
+	JvmArgs string `json:"jvmArgs"`
+	Args    string `json:"args"`
+}
+
 // ServiceSpec is the editable, as-written form of a service.
 type ServiceSpec struct {
 	Name         string      `json:"name"`
@@ -57,6 +63,7 @@ type ServiceSpec struct {
 	Spring       *SpringSpec `json:"spring,omitempty"`
 	Node         *NodeSpec   `json:"node,omitempty"`
 	Script       *ScriptSpec `json:"script,omitempty"`
+	Jar          *JarSpec    `json:"jar,omitempty"`
 	Cwd          string      `json:"cwd"`
 	Shell        string      `json:"shell"`
 	Runtime      []string    `json:"runtime"`
@@ -82,6 +89,7 @@ type rawSpec struct {
 	Spring      *SpringOpts `yaml:"spring"`
 	Node        *NodeOpts   `yaml:"node"`
 	Script      *ScriptOpts `yaml:"script"`
+	Jar         *JarOpts    `yaml:"jar"`
 	Cwd         string      `yaml:"cwd"`
 	Shell       string      `yaml:"shell"`
 	Runtime     StringList  `yaml:"runtime"`
@@ -108,7 +116,7 @@ var (
 )
 
 // keyOrder is used when adding keys to a service.
-var keyOrder = []string{"group", "description", "type", "cwd", "command", "spring", "node", "script", "shell", "runtime", "env", "env_file",
+var keyOrder = []string{"group", "description", "type", "cwd", "command", "spring", "node", "script", "jar", "shell", "runtime", "env", "env_file",
 	"encoding", "depends_on", "ready", "restart", "max_restarts", "autostart", "stop_timeout", "url"}
 
 func loadDoc(path string) (*yaml.Node, *yaml.Node, error) {
@@ -309,7 +317,7 @@ func applyType(m *yaml.Node, s ServiceSpec) {
 		setKey(m, "type", scalar(t))
 		setKey(m, "command", nil)
 	}
-	var spring, node, script *yaml.Node
+	var spring, node, script, jar *yaml.Node
 	switch t {
 	case TypeSpring:
 		o := s.Spring
@@ -354,10 +362,17 @@ func applyType(m *yaml.Node, s ServiceSpec) {
 			o = &ScriptSpec{}
 		}
 		script = block("file", strOrNil(o.File), "args", strOrNil(o.Args))
+	case TypeJar:
+		o := s.Jar
+		if o == nil {
+			o = &JarSpec{}
+		}
+		jar = block("file", strOrNil(o.File), "jvm_args", strOrNil(o.JvmArgs), "args", strOrNil(o.Args))
 	}
 	setKey(m, "spring", spring)
 	setKey(m, "node", node)
 	setKey(m, "script", script)
+	setKey(m, "jar", jar)
 }
 
 func flowSeq(items []string) *yaml.Node {
@@ -432,6 +447,9 @@ func ReadSpec(path, name string) (ServiceSpec, error) {
 	}
 	if o := r.Script; o != nil {
 		s.Script = &ScriptSpec{File: o.File, Args: o.Args}
+	}
+	if o := r.Jar; o != nil {
+		s.Jar = &JarSpec{File: o.File, JvmArgs: o.JvmArgs, Args: o.Args}
 	}
 	return s, nil
 }
@@ -842,6 +860,9 @@ func PreviewSpec(dir string, s ServiceSpec) (build, run string, err error) {
 	}
 	if o := s.Script; o != nil {
 		svc.Script = &ScriptOpts{File: o.File, Args: o.Args}
+	}
+	if o := s.Jar; o != nil {
+		svc.Jar = &JarOpts{File: o.File, JvmArgs: o.JvmArgs, Args: o.Args}
 	}
 	if err := normalizeType(&svc); err != nil {
 		return "", "", err

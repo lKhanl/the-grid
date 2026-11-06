@@ -1,6 +1,6 @@
 export type Status = 'stopped' | 'starting' | 'building' | 'running' | 'stopping' | 'exited' | 'crashed'
 
-export type ServiceType = 'spring-boot' | 'node' | 'script' | 'custom'
+export type ServiceType = 'spring-boot' | 'node' | 'script' | 'jar' | 'custom'
 
 export interface Info {
   name: string
@@ -170,9 +170,16 @@ export interface ScriptSpec {
   args: string
 }
 
+export interface JarSpec {
+  file: string
+  jvmArgs: string
+  args: string
+}
+
 export const emptySpring = (): SpringSpec => ({ module: '', profiles: [], jvmArgs: '', args: '', mode: 'package', skipTests: true, offline: false })
 export const emptyNode = (): NodeSpec => ({ script: '', args: '', install: 'if-changed', packageManager: 'auto' })
 export const emptyScript = (): ScriptSpec => ({ file: '', args: '' })
+export const emptyJar = (): JarSpec => ({ file: '', jvmArgs: '', args: '' })
 
 export interface ServiceSpec {
   name: string
@@ -183,6 +190,7 @@ export interface ServiceSpec {
   spring?: SpringSpec | null
   node?: NodeSpec | null
   script?: ScriptSpec | null
+  jar?: JarSpec | null
   cwd: string
   shell: string
   runtime: string[] | null
@@ -314,6 +322,7 @@ export interface DetectResult {
     installed: boolean
   }
   scripts?: string[]
+  jars?: string[]
 }
 
 export interface DirListing {

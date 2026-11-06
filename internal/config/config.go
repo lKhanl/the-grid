@@ -58,11 +58,12 @@ type Service struct {
 	Name        string            `yaml:"-"`
 	Group       string            `yaml:"group"`
 	Description string            `yaml:"description"`
-	Type        string            `yaml:"type"` // spring-boot | node | script | custom (default)
+	Type        string            `yaml:"type"` // spring-boot | node | script | jar | custom (default)
 	Command     string            `yaml:"command"`
 	Spring      *SpringOpts       `yaml:"spring"`
 	Node        *NodeOpts         `yaml:"node"`
 	Script      *ScriptOpts       `yaml:"script"`
+	Jar         *JarOpts          `yaml:"jar"`
 	Cwd         string            `yaml:"cwd"`
 	Shell       string            `yaml:"shell"`
 	Env         map[string]string `yaml:"env"`

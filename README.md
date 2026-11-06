@@ -58,6 +58,7 @@ The commands are derived on every start, so they follow changes in `pom.xml`:
 | `spring-boot` + `mode: run` | — | `mvn spring-boot:run` |
 | `node` | `npm/yarn/pnpm install`, only when `package.json` or the lock file changed | `npm run <script>` |
 | `script` | — | the `.bat` / `.cmd` / `.ps1` / `.sh` / `.py` file |
+| `jar` | — | `java <jvm_args> -jar <file> <args>` (an already built jar; `file` may use `*`, newest match wins) |
 | `custom` (default) | — | `command` as written |
 
 While the build runs the service shows **building**; a failed build stops there (the app is
@@ -105,8 +106,8 @@ See [`grid.example.yaml`](grid.example.yaml) for every option.
 
 | key | meaning |
 |---|---|
-| `type` | `spring-boot`, `node`, `script` or `custom` (default); see *Service types* |
-| `spring` / `node` / `script` | options of the typed service (module, profiles, jvm_args, args, mode, skip_tests, offline / script, args, install, package_manager / file, args) |
+| `type` | `spring-boot`, `node`, `script`, `jar` or `custom` (default); see *Service types* |
+| `spring` / `node` / `script` / `jar` | options of the typed service (module, profiles, jvm_args, args, mode, skip_tests, offline / script, args, install, package_manager / file, args / file, jvm_args, args) |
 | `command` | command line for `custom` services, run through `shell` |
 | `shell` | Windows: `cmd` (default), `powershell`, `pwsh` or a bash path; Unix: `/bin/sh` |
 | `cwd` | working directory, relative to the config file |

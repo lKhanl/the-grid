@@ -182,6 +182,14 @@ export const SpringIcon = ({ size }: P) => (
   </Svg>
 )
 
+export const JarIcon = ({ size }: P) => (
+  <Svg size={size}>
+    <path d="M7 3.5h10M8 3.5v2M16 3.5v2" />
+    <path d="M6 5.5h12v2.5a2 2 0 0 1 0 0v10.5a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8z" />
+    <path d="M9 12h6M9 15.5h6" />
+  </Svg>
+)
+
 export const CodeIcon = ({ size }: P) => (
   <Svg size={size}>
     <path d="M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 4.5l-3 15" />

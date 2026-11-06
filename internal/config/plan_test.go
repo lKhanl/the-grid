@@ -90,3 +90,28 @@ func TestTypeValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestJarPlan(t *testing.T) {
+	root := t.TempDir()
+	s := Service{Name: "j", Type: TypeJar, Cwd: root, Jar: &JarOpts{File: "target/*.jar", JvmArgs: "-Xmx512m", Args: "--port=1"}}
+	if err := normalizeType(&s); err != nil {
+		t.Fatal(err)
+	}
+	p := s.Plan(false)
+	if p.Build != "" {
+		t.Fatal("jar has no build step")
+	}
+	if _, _, err := p.Run(); err == nil {
+		t.Fatal("expected error when no jar exists")
+	}
+	os.MkdirAll(filepath.Join(root, "target"), 0o755)
+	os.WriteFile(filepath.Join(root, "target", "a.jar"), nil, 0o644)
+	cmd, cwd, err := p.Run()
+	if err != nil || cwd != root || !strings.HasPrefix(cmd, "java -Xmx512m -jar") || !strings.HasSuffix(cmd, "a.jar --port=1") {
+		t.Fatalf("run %q in %s: %v", cmd, cwd, err)
+	}
+	bad := Service{Name: "j", Type: TypeJar}
+	if normalizeType(&bad) == nil {
+		t.Fatal("jar.file should be required")
+	}
+}

@@ -39,6 +39,16 @@ services:
     ready: { log: "Started SpringApiApplication in", timeout: 2m }
     url: http://localhost:8090/accounts/42
 
+  spring-api-jar:
+    group: backend
+    description: Prebuilt jar run with the jar type (java -jar, no build step)
+    type: jar
+    cwd: demo/spring-api
+    jar: {file: target/*.jar, jvm_args: -Xmx256m}
+    env: {PORT: "8092", DEMO_WARMUP_SECONDS: "3"}
+    ready: {log: "Started SpringApiApplication in", timeout: 2m}
+    url: http://localhost:8092/accounts/1
+
   gateway:
     group: backend
     command: node demo/api.js

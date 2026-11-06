@@ -8,6 +8,7 @@ import (
 	"encoding/xml"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -18,10 +19,11 @@ import (
 type Result struct {
 	Dir       string   `json:"dir"`
 	Exists    bool     `json:"exists"`
-	Suggested string   `json:"suggested"` // spring-boot | node | script | custom
+	Suggested string   `json:"suggested"` // spring-boot | node | script | jar | custom
 	Spring    *Spring  `json:"spring,omitempty"`
 	Node      *Node    `json:"node,omitempty"`
 	Scripts   []string `json:"scripts,omitempty"`
+	Jars      []string `json:"jars,omitempty"` // *.jar in the folder and its target/ or build/libs
 }
 
 type Spring struct {
@@ -59,6 +61,7 @@ func Dir(dir string) Result {
 	r.Spring = spring(dir)
 	r.Node = node(dir)
 	r.Scripts = scripts(dir)
+	r.Jars = jars(dir)
 	switch {
 	case r.Spring != nil && len(r.Spring.Modules) > 0:
 		r.Suggested = "spring-boot"
@@ -66,6 +69,8 @@ func Dir(dir string) Result {
 		r.Suggested = "node"
 	case len(r.Scripts) > 0:
 		r.Suggested = "script"
+	case len(r.Jars) > 0:
+		r.Suggested = "jar"
 	}
 	return r
 }
@@ -352,6 +357,27 @@ func scripts(dir string) []string {
 			continue
 		}
 		out = append(out, n)
+	}
+	return out
+}
+
+// jars lists runnable-looking jars (slash-separated, relative to dir), newest first within a folder.
+func jars(dir string) []string {
+	var out []string
+	for _, sub := range []string{"", "target", "build/libs"} {
+		entries, _ := os.ReadDir(filepath.Join(dir, filepath.FromSlash(sub)))
+		for _, e := range entries {
+			n := e.Name()
+			base := strings.TrimSuffix(n, ".jar")
+			if e.IsDir() || base == n || strings.HasPrefix(n, "original-") {
+				continue
+			}
+			if strings.HasSuffix(base, "-sources") || strings.HasSuffix(base, "-javadoc") ||
+				strings.HasSuffix(base, "-tests") || strings.HasSuffix(base, "-plain") {
+				continue
+			}
+			out = append(out, path.Join(sub, n))
+		}
 	}
 	return out
 }

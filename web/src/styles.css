@@ -240,12 +240,14 @@ details.form-section[open] summary { margin-bottom: 10px; }
 /* ---- typed services ---- */
 .input-row { display: flex; gap: 8px; }
 .input-row input { flex: 1; min-width: 0; }
-.type-cards.four { grid-template-columns: repeat(4, 1fr); }
+.type-cards.four { grid-template-columns: repeat(5, 1fr); }
 .type-card { position: relative; }
 .type-card .type-icon { display: inline-flex; color: var(--muted); }
 .type-card.svc-spring-boot .type-icon { color: #6db33f; }
 .type-card.svc-node .type-icon { color: #7cc77f; }
 .type-card.svc-script .type-icon { color: #b9a3f0; }
+.type-card.svc-jar .type-icon { color: #e8a65d; }
+.type-card.svc-jar.on { border-color: #b97a2e; background: #2e261b; }
 .type-card.svc-spring-boot.on { border-color: #5d9b36; background: #1f2a1b; }
 .type-card.svc-node.on { border-color: #4f9a53; background: #1f2b21; }
 .type-card.svc-script.on { border-color: #7d68c4; background: #29253a; }

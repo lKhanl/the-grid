@@ -4,6 +4,7 @@ import {
   deleteService,
   detect,
   emptyNode,
+  emptyJar,
   emptyScript,
   emptySpec,
   emptySpring,
@@ -14,13 +15,14 @@ import {
   type Info,
   type NodeSpec,
   type RuntimeType,
+  type JarSpec,
   type ScriptSpec,
   type ServiceSpec,
   type ServiceType,
   type SpringSpec,
   type State,
 } from './api'
-import { CheckIcon, CloseIcon, CodeIcon, FolderIcon, HammerIcon, NodeIcon, PlayIcon, PlusIcon, ScriptIcon, SpringIcon, TrashIcon, WarnIcon } from './icons'
+import { CheckIcon, CloseIcon, CodeIcon, FolderIcon, HammerIcon, JarIcon, NodeIcon, PlayIcon, PlusIcon, ScriptIcon, SpringIcon, TrashIcon, WarnIcon } from './icons'
 import { RuntimeForm } from './RuntimeForm'
 import { FolderPicker } from './FolderPicker'
 
@@ -31,6 +33,7 @@ const TYPES: { type: ServiceType; label: string; icon: ReactNode; help: string }
   { type: 'spring-boot', label: 'Spring Boot', icon: <SpringIcon size={20} />, help: 'Maven project. Every start builds the app, then runs it.' },
   { type: 'node', label: 'Node', icon: <NodeIcon size={20} />, help: 'Runs a package.json script; installs dependencies when they change.' },
   { type: 'script', label: 'Script', icon: <ScriptIcon size={20} />, help: 'A .bat, .cmd, .ps1, .sh or .py file in the folder.' },
+  { type: 'jar', label: 'Jar', icon: <JarIcon size={20} />, help: 'An already built .jar, run with java -jar (no build step).' },
   { type: 'custom', label: 'Custom command', icon: <CodeIcon size={20} />, help: 'Any command line, run as you type it.' },
 ]
 
@@ -105,7 +108,7 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
   }, [cwd, spec === null]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live preview of the generated commands.
-  const previewKey = spec ? JSON.stringify([spec.type, spec.cwd, spec.command, spec.spring, spec.node, spec.script]) : ''
+  const previewKey = spec ? JSON.stringify([spec.type, spec.cwd, spec.command, spec.spring, spec.node, spec.script, spec.jar]) : ''
   useEffect(() => {
     if (!spec) return
     let live = true
@@ -160,6 +163,12 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
         if (node) pickRuntimes.push(node.name)
       } else if (n.type === 'script' && d.scripts?.length) {
         if (!isTouched('script')) n.script = { ...emptyScript(), file: d.scripts[0] }
+      } else if (n.type === 'jar' && d.jars?.length) {
+        const jar = d.jars[0]
+        if (!isTouched('jar')) n.jar = { ...emptyJar(), file: jar }
+        name = jar.split('/').pop()!.replace(/\.jar$/i, '').replace(/-\d.*$/, '')
+        const java = runtimesOf('java')[0]
+        if (java) pickRuntimes.push(java.name)
       }
       if (!isTouched('name') && name) n.name = slug(name)
       if (!isTouched('url') && url) n.url = url
@@ -190,6 +199,11 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
     setSpec((s) => (s ? { ...s, script: { ...(s.script ?? emptyScript()), [k]: v } } : s))
   }
 
+  const setJar = <K extends keyof JarSpec>(k: K, v: JarSpec[K]) => {
+    touched.current.add('jar')
+    setSpec((s) => (s ? { ...s, jar: { ...(s.jar ?? emptyJar()), [k]: v } } : s))
+  }
+
   function chooseType(t: ServiceType) {
     touched.current.add('type')
     setSpec((s) => {
@@ -198,6 +212,7 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
       if (t === 'spring-boot' && !n.spring) n.spring = { ...emptySpring(), module: det?.spring?.modules[0]?.path ?? '' }
       if (t === 'node' && !n.node) n.node = { ...emptyNode(), script: det?.node?.scripts[0] ?? '' }
       if (t === 'script' && !n.script) n.script = { ...emptyScript(), file: det?.scripts?.[0] ?? '' }
+      if (t === 'jar' && !n.jar) n.jar = { ...emptyJar(), file: det?.jars?.[0] ?? '' }
       return n
     })
   }
@@ -218,7 +233,9 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
         ? 'Pick a package.json script'
         : spec.type === 'script' && !spec.script?.file
           ? 'Pick a script file'
-          : null
+          : spec.type === 'jar' && !spec.jar?.file
+            ? 'Pick a jar file'
+            : null
   const canSave = !!spec && !!spec.name && !nameError && !typeError && !busy
 
   async function save(then?: 'start' | 'restart') {
@@ -234,6 +251,7 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
       spring: spec.type === 'spring-boot' ? (spec.spring ?? emptySpring()) : null,
       node: spec.type === 'node' ? spec.node : null,
       script: spec.type === 'script' ? spec.script : null,
+      jar: spec.type === 'jar' ? spec.jar : null,
     }
     setBusy(true)
     setError(null)
@@ -509,6 +527,30 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
                 </div>
               )}
 
+              {spec.type === 'jar' && (
+                <>
+                  <div className="grid-2">
+                    <label className="field">
+                      <span>Jar file *</span>
+                      <input list="pr-jars" className="mono" value={spec.jar?.file ?? ''} onChange={(e) => setJar('file', e.target.value)} placeholder="target/app.jar  (or target/*.jar)" />
+                      <datalist id="pr-jars">
+                        {det?.jars?.map((s) => (
+                          <option key={s} value={s} />
+                        ))}
+                      </datalist>
+                    </label>
+                    <label className="field">
+                      <span>Program arguments</span>
+                      <input className="mono" value={spec.jar?.args ?? ''} onChange={(e) => setJar('args', e.target.value)} placeholder="--server.port=8081" />
+                    </label>
+                  </div>
+                  <label className="field">
+                    <span>VM options</span>
+                    <input className="mono" value={spec.jar?.jvmArgs ?? ''} onChange={(e) => setJar('jvmArgs', e.target.value)} placeholder="-Xmx1g -Dfile.encoding=UTF-8" />
+                  </label>
+                </>
+              )}
+
               {spec.type === 'custom' && (
                 <label className="field">
                   <span>Command *</span>
@@ -535,7 +577,7 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
               )}
 
               <div className="field">
-                <span>Runtime{spec.type === 'spring-boot' ? ' (Java + Maven)' : spec.type === 'node' ? ' (Node)' : ''}</span>
+                <span>Runtime{spec.type === 'spring-boot' ? ' (Java + Maven)' : spec.type === 'jar' ? ' (Java)' : spec.type === 'node' ? ' (Node)' : ''}</span>
                 <div className="chips">
                   {state.runtimes.map((r) => {
                     const on = spec.runtime?.includes(r.name)
@@ -803,6 +845,8 @@ function DetectLine({ det, path }: { det: DetectResult; path: string }) {
     text = `Spring Boot (Maven) · ${det.spring.artifactId}${det.spring.javaVersion ? ` · Java ${det.spring.javaVersion}` : ''}${n > 1 ? ` · ${n} apps` : ''}${det.spring.wrapper ? ' · mvnw' : ''}`
   } else if (det.node) {
     text = `Node · ${det.node.name || 'package.json'} · ${det.node.packageManager}${det.node.nodeVersion ? ` · node ${det.node.nodeVersion}` : ''}`
+  } else if (det.jars?.length) {
+    text = `${det.jars.length} jar file${det.jars.length > 1 ? 's' : ''}`
   } else if (det.scripts?.length) {
     text = `${det.scripts.length} script file${det.scripts.length > 1 ? 's' : ''}`
   }
