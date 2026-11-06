@@ -72,6 +72,27 @@ main class, `java.version` (matching Java runtime preselected), `server.port` (U
 files (`application-*.yml`), or `package.json` scripts, lock file and `engines.node`.
 The generated build and run commands are previewed as you edit.
 
+## For AI agents: `grid mcp`
+
+`grid mcp` is an MCP server (stdio) with three tools, so an agent can run the
+edit → restart → read logs loop without you copy-pasting:
+
+| tool | what it does |
+|---|---|
+| `status` | services and their state |
+| `logs` | last N log lines of a service (colors removed) |
+| `restart` | restart / start / stop, waits until it is running or failed, returns the last log lines |
+
+The Grid itself must be running (`grid`). Register it in the agent's MCP config, for example
+(OpenCode style; the key names depend on the agent):
+
+```json
+{ "mcp": { "grid": { "type": "local", "command": ["C:\\tools\\grid.exe", "mcp"], "enabled": true,
+                      "environment": { "GRID_PORT": "7070" } } } }
+```
+
+Without MCP the same works through the CLI (`grid status`, `grid logs <svc> -n 100`, `grid restart <svc>`).
+
 ## Adding and editing services in the UI
 
 **New** (sidebar, or `N`), the **+** on a group header, **✎** on a row, right-click → **Edit**,

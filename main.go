@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/lKhanl/the-grid/internal/config"
+	"github.com/lKhanl/the-grid/internal/mcp"
 	"github.com/lKhanl/the-grid/internal/runner"
 	"github.com/lKhanl/the-grid/internal/server"
 	"github.com/lKhanl/the-grid/internal/term"
@@ -44,6 +45,7 @@ Usage:
   grid logs    <service> [-n 200] [-f]
   grid reload                  re-read grid.yaml
   grid runtimes [-c file]      check configured java/node/script runtimes
+  grid mcp [-p 7070]           MCP server (stdio) so AI agents can read logs and restart services
 
 Client commands talk to a running server on -p (or $GRID_PORT).
 `
@@ -74,6 +76,8 @@ func main() {
 		err = reload(args)
 	case "runtimes":
 		err = runtimes(args)
+	case "mcp":
+		err = mcpServe(args)
 	case "version":
 		fmt.Println(version)
 	case "help", "-h", "--help":
@@ -87,6 +91,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+// mcpServe speaks MCP on stdin/stdout; stdout carries only protocol messages.
+func mcpServe(args []string) error {
+	fset, port := clientFlags("mcp", args)
+	fset.Parse(args)
+	return mcp.New(*port, version).Serve(os.Stdin, os.Stdout)
 }
 
 func envPort() int {
