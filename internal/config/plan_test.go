@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSpringPackagePlan(t *testing.T) {
@@ -14,7 +15,7 @@ func TestSpringPackagePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := s.Plan(false)
-	for _, want := range []string{"mvn", "-o", "-DskipTests", "package", "-pl app -am"} {
+	for _, want := range []string{"mvn", "-o", "-Dmaven.test.skip=true", "package", "-pl app -am"} {
 		if !strings.Contains(p.Build, want) {
 			t.Errorf("build %q lacks %q", p.Build, want)
 		}
@@ -113,5 +114,119 @@ func TestJarPlan(t *testing.T) {
 	bad := Service{Name: "j", Type: TypeJar}
 	if normalizeType(&bad) == nil {
 		t.Fatal("jar.file should be required")
+	}
+}
+
+// springProject builds root/pom.xml, root/app/{pom.xml,src/Main.java,target/app.jar}, all dated `old`,
+// plus a build stamp one hour newer; it returns the service, the root and the stamp path.
+func springProject(t *testing.T, opts *SpringOpts, old time.Time) (Service, string, string) { // service, root, stamp
+	t.Helper()
+	root := t.TempDir()
+	for _, f := range []string{"pom.xml", "app/pom.xml", "app/src/Main.java", "app/target/app-1.0.jar"} {
+		p := filepath.Join(root, filepath.FromSlash(f))
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte("x"), 0o644)
+	}
+	age := func(p string) { os.Chtimes(p, old, old) }
+	filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error { age(p); return nil })
+	opts.Module = "app"
+	s := Service{Name: "a", Type: TypeSpring, Cwd: root, Spring: opts}
+	if err := normalizeType(&s); err != nil {
+		t.Fatal(err)
+	}
+	// the last build started after everything that went into it was written
+	stamp := filepath.Join(root, "app", "target", buildStamp)
+	os.WriteFile(stamp, []byte("x"), 0o644)
+	now := old.Add(time.Hour)
+	os.Chtimes(stamp, now, now)
+	return s, root, stamp
+}
+
+func TestSpringSkipsBuildWhenNothingChanged(t *testing.T) {
+	s, _, _ := springProject(t, &SpringOpts{}, time.Now().Add(-2*time.Hour))
+	p := s.Plan(false)
+	if p.Build != "" || !strings.Contains(p.Note, "build skipped") {
+		t.Fatalf("build %q note %q", p.Build, p.Note)
+	}
+	if p.BuildPreview == "" {
+		t.Fatal("the UI preview must still show the build command")
+	}
+	if b, _ := s.Preview(); b == "" {
+		t.Fatal("Preview must keep the build command")
+	}
+	if _, _, err := p.Run(); err != nil {
+		t.Fatalf("must still run the jar: %v", err)
+	}
+}
+
+func TestSpringRebuildsWhenInputsChange(t *testing.T) {
+	later := time.Now().Add(-30 * time.Minute) // newer than the old inputs, older than... set explicitly below
+	for name, touch := range map[string]func(root string){
+		"source edited":      func(r string) { os.Chtimes(filepath.Join(r, "app/src/Main.java"), later, later) },
+		"module pom edited":  func(r string) { os.Chtimes(filepath.Join(r, "app/pom.xml"), later, later) },
+		"parent pom edited":  func(r string) { os.Chtimes(filepath.Join(r, "pom.xml"), later, later) },
+		"file added/removed": func(r string) { os.Chtimes(filepath.Join(r, "app/src"), later, later) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, root, stamp := springProject(t, &SpringOpts{}, time.Now().Add(-3*time.Hour))
+			old := time.Now().Add(-2 * time.Hour)
+			os.Chtimes(stamp, old, old) // last build older than `later`
+			touch(root)
+			if p := s.Plan(false); p.Build == "" {
+				t.Fatalf("expected a rebuild (%s), got note %q", name, p.Note)
+			}
+		})
+	}
+}
+
+func TestSpringAlwaysBuildAndMissingJar(t *testing.T) {
+	s, _, _ := springProject(t, &SpringOpts{AlwaysBuild: true}, time.Now().Add(-2*time.Hour))
+	if p := s.Plan(false); p.Build == "" {
+		t.Fatal("always_build must build")
+	}
+	s, root, stamp := springProject(t, &SpringOpts{}, time.Now().Add(-2*time.Hour))
+	os.Remove(stamp)
+	if p := s.Plan(false); p.Build == "" {
+		t.Fatal("never built by Grid (no stamp): must build")
+	}
+	s, root, _ = springProject(t, &SpringOpts{}, time.Now().Add(-2*time.Hour))
+	os.Remove(filepath.Join(root, "app", "target", "app-1.0.jar"))
+	if p := s.Plan(false); p.Build == "" {
+		t.Fatal("no jar: must build")
+	}
+}
+
+func TestSpringSkipTestsAlsoSkipsCompilingThem(t *testing.T) {
+	s := Service{Type: TypeSpring, Cwd: t.TempDir(), Spring: &SpringOpts{}}
+	normalizeType(&s)
+	if b := s.Plan(false).Build; !strings.Contains(b, "-Dmaven.test.skip=true") || strings.Contains(b, "-DskipTests") {
+		t.Fatalf("build %q", b)
+	}
+	no := false
+	s.Spring.SkipTests = &no
+	if b := s.Plan(false).Build; strings.Contains(b, "skip") && strings.Contains(b, "test") {
+		t.Fatalf("tests on: %q", b)
+	}
+}
+
+func TestSpringStampWrittenAfterBuildDatesFromItsStart(t *testing.T) {
+	s, root, stamp := springProject(t, &SpringOpts{}, time.Now().Add(-3*time.Hour))
+	os.Remove(stamp)
+	p := s.Plan(false)
+	if p.Build == "" || p.AfterBuild == nil {
+		t.Fatal("expected a build with an AfterBuild hook")
+	}
+	time.Sleep(20 * time.Millisecond)
+	edit := time.Now() // edited while the build was running
+	os.Chtimes(filepath.Join(root, "app/src/Main.java"), edit, edit)
+	p.AfterBuild()
+	if p := s.Plan(false); p.Build == "" {
+		t.Fatal("an edit made during the build must trigger the next build")
+	}
+	// and without such an edit the next start skips
+	old := time.Now().Add(-time.Hour)
+	filepath.WalkDir(filepath.Join(root, "app", "src"), func(p string, d os.DirEntry, err error) error { os.Chtimes(p, old, old); return nil })
+	if p := s.Plan(false); p.Build != "" {
+		t.Fatalf("should skip, note %q", p.Note)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Service types.
@@ -31,8 +32,11 @@ type SpringOpts struct {
 	JvmArgs   string     `yaml:"jvm_args"`   // e.g. -Xmx1g -Dfoo=bar
 	Args      string     `yaml:"args"`       // program arguments
 	Mode      string     `yaml:"mode"`       // package (build jar, then java -jar) | run (mvn spring-boot:run)
-	SkipTests *bool      `yaml:"skip_tests"` // default true
+	SkipTests *bool      `yaml:"skip_tests"` // default true: skips running AND compiling tests
 	Offline   bool       `yaml:"offline"`    // mvn -o
+	// AlwaysBuild runs mvn package on every start. By default the build is skipped
+	// when nothing under src/ or in a pom.xml is newer than the built jar.
+	AlwaysBuild bool `yaml:"always_build"`
 }
 
 // NodeOpts configures a Node service.
@@ -64,6 +68,8 @@ type Plan struct {
 	// Run resolves the run command after the build (the jar name is only known then).
 	Run        func() (cmd, cwd string, err error)
 	AfterBuild func() // called after a successful build
+	// Note explains a build that was skipped on purpose (shown in the log).
+	Note string
 	// Previews for the UI, available before building.
 	BuildPreview string
 	RunPreview   string
@@ -136,7 +142,7 @@ func (s *Service) plan(skipBuild, check bool) *Plan {
 	var p *Plan
 	switch s.Type {
 	case TypeSpring:
-		p = s.springPlan()
+		p = s.springPlan(check && !skipBuild)
 	case TypeNode:
 		p = s.nodePlan(check && !skipBuild)
 	case TypeScript:
@@ -186,7 +192,7 @@ func mavenCmd(root string) string {
 	return "mvn"
 }
 
-func (s *Service) springPlan() *Plan {
+func (s *Service) springPlan(check bool) *Plan {
 	o := s.Spring
 	root := s.Cwd
 	mod := root
@@ -216,7 +222,8 @@ func (s *Service) springPlan() *Plan {
 	}
 
 	skip := o.SkipTests == nil || *o.SkipTests
-	build := join(mvn, flags, map[bool]string{true: "-DskipTests"}[skip], "package")
+	// -Dmaven.test.skip also skips compiling the tests (-DskipTests only skips running them)
+	build := join(mvn, flags, map[bool]string{true: "-Dmaven.test.skip=true"}[skip], "package")
 	if o.Module != "" {
 		build += " -pl " + quote(o.Module) + " -am"
 	}
@@ -228,8 +235,27 @@ func (s *Service) springPlan() *Plan {
 		return join("java", o.JvmArgs, "-jar", quote(jar), prof, o.Args)
 	}
 	rel := filepath.Join(o.Module, "target", "*.jar")
+	// A stamp file records when the last successful build started; the jar's own date
+	// cannot be used (Spring Boot's reproducible builds stamp jars with a fixed date).
+	stamp := filepath.Join(mod, "target", buildStamp)
+	buildCmd, note := build, ""
+	var after func()
+	if check && !o.AlwaysBuild {
+		started := time.Now()
+		after = func() {
+			os.MkdirAll(filepath.Dir(stamp), 0o755)
+			if os.WriteFile(stamp, []byte(started.Format(time.RFC3339)), 0o644) == nil {
+				os.Chtimes(stamp, started, started) // edits made while it was building count as newer
+			}
+		}
+		if _, err := FindBootJar(filepath.Join(mod, "target")); err == nil {
+			if fresh, why := buildIsFresh(root, stamp); fresh {
+				buildCmd, note, after = "", why, nil
+			}
+		}
+	}
 	return &Plan{
-		Build: build, BuildLabel: "mvn package", BuildCwd: root,
+		Build: buildCmd, Note: note, AfterBuild: after, BuildLabel: "mvn package", BuildCwd: root,
 		BuildPreview: build,
 		RunPreview:   runFor(rel),
 		Run: func() (string, string, error) {
@@ -240,6 +266,48 @@ func (s *Service) springPlan() *Plan {
 			return runFor(jar), mod, nil
 		},
 	}
+}
+
+const buildStamp = ".grid-build"
+
+// buildIsFresh reports whether nothing that goes into the jar changed since the last
+// build Grid ran: files under any src/ folder, pom.xml files and .mvn/ of the whole project
+// (upstream modules included). Folders count too, so an added or deleted file is noticed.
+// A build made outside Grid (IntelliJ, a terminal) leaves no stamp, so the first start builds.
+// Dependencies that changed in ~/.m2 are not seen: use "Always rebuild" for those.
+func buildIsFresh(root, stamp string) (bool, string) {
+	fi, err := os.Stat(stamp)
+	if err != nil {
+		return false, ""
+	}
+	built := fi.ModTime()
+	var newest time.Time
+	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case "target", ".git", "node_modules", ".idea", ".gradle", ".vscode":
+				return filepath.SkipDir
+			}
+		}
+		rel, _ := filepath.Rel(root, path)
+		rel = filepath.ToSlash(rel)
+		counts := d.Name() == "pom.xml" || rel == "src" || rel == ".mvn" || strings.HasPrefix(rel, ".mvn/") ||
+			strings.HasPrefix(rel, "src/") || strings.Contains(rel, "/src/") || strings.HasSuffix(rel, "/src")
+		if !counts {
+			return nil
+		}
+		if info, err := d.Info(); err == nil && info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+		return nil
+	})
+	if newest.After(built) {
+		return false, ""
+	}
+	return true, fmt.Sprintf("build skipped: nothing changed in src/ or pom.xml since the last build at %s (\"Always rebuild\" forces it)", built.Format("15:04:05"))
 }
 
 // FindBootJar returns the newest runnable jar in dir (skips sources, javadoc, tests, plain).

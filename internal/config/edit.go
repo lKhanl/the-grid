@@ -33,6 +33,8 @@ type SpringSpec struct {
 	Mode      string   `json:"mode"`
 	SkipTests bool     `json:"skipTests"`
 	Offline   bool     `json:"offline"`
+	// AlwaysBuild: no "skip the build when nothing changed"
+	AlwaysBuild bool `json:"alwaysBuild"`
 }
 
 type NodeSpec struct {
@@ -328,7 +330,7 @@ func applyType(m *yaml.Node, s ServiceSpec) {
 		if len(o.Profiles) > 0 {
 			profiles = flowSeq(o.Profiles)
 		}
-		var mode, skip, offline *yaml.Node
+		var mode, skip, offline, always *yaml.Node
 		if o.Mode == "run" {
 			mode = scalar("run")
 		}
@@ -338,8 +340,11 @@ func applyType(m *yaml.Node, s ServiceSpec) {
 		if o.Offline {
 			offline = boolNode(true)
 		}
+		if o.AlwaysBuild {
+			always = boolNode(true)
+		}
 		spring = block("module", strOrNil(o.Module), "profiles", profiles, "jvm_args", strOrNil(o.JvmArgs),
-			"args", strOrNil(o.Args), "mode", mode, "skip_tests", skip, "offline", offline)
+			"args", strOrNil(o.Args), "mode", mode, "skip_tests", skip, "offline", offline, "always_build", always)
 		if spring == nil {
 			spring = &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}
 		}
@@ -440,7 +445,7 @@ func ReadSpec(path, name string) (ServiceSpec, error) {
 	}
 	if o := r.Spring; o != nil {
 		s.Spring = &SpringSpec{Module: o.Module, Profiles: o.Profiles, JvmArgs: o.JvmArgs, Args: o.Args,
-			Mode: o.Mode, SkipTests: o.SkipTests == nil || *o.SkipTests, Offline: o.Offline}
+			Mode: o.Mode, SkipTests: o.SkipTests == nil || *o.SkipTests, Offline: o.Offline, AlwaysBuild: o.AlwaysBuild}
 	}
 	if o := r.Node; o != nil {
 		s.Node = &NodeSpec{Script: o.Script, Args: o.Args, Install: o.Install, PackageManager: o.PackageManager}
@@ -853,7 +858,7 @@ func PreviewSpec(dir string, s ServiceSpec) (build, run string, err error) {
 	if o := s.Spring; o != nil {
 		skip := o.SkipTests
 		svc.Spring = &SpringOpts{Module: o.Module, Profiles: o.Profiles, JvmArgs: o.JvmArgs, Args: o.Args,
-			Mode: o.Mode, SkipTests: &skip, Offline: o.Offline}
+			Mode: o.Mode, SkipTests: &skip, Offline: o.Offline, AlwaysBuild: o.AlwaysBuild}
 	}
 	if o := s.Node; o != nil {
 		svc.Node = &NodeOpts{Script: o.Script, Args: o.Args, Install: o.Install, PackageManager: o.PackageManager}

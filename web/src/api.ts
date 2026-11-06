@@ -176,6 +176,7 @@ export interface SpringSpec {
   mode: string // package | run
   skipTests: boolean
   offline: boolean
+  alwaysBuild: boolean
 }
 
 export interface NodeSpec {
@@ -196,7 +197,7 @@ export interface JarSpec {
   args: string
 }
 
-export const emptySpring = (): SpringSpec => ({ module: '', profiles: [], jvmArgs: '', args: '', mode: 'package', skipTests: true, offline: false })
+export const emptySpring = (): SpringSpec => ({ module: '', profiles: [], jvmArgs: '', args: '', mode: 'package', skipTests: true, offline: false, alwaysBuild: false })
 export const emptyNode = (): NodeSpec => ({ script: '', args: '', install: 'if-changed', packageManager: 'auto' })
 export const emptyScript = (): ScriptSpec => ({ file: '', args: '' })
 export const emptyJar = (): JarSpec => ({ file: '', jvmArgs: '', args: '' })

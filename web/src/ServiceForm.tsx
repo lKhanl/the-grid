@@ -450,9 +450,15 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
                   </div>
                   <div className="checks">
                     {spec.spring?.mode !== 'run' && (
-                      <label className="check">
+                      <label className="check" title="Passes -Dmaven.test.skip=true: tests are neither run nor compiled (faster). Turn off if a module needs another module's test jar.">
                         <input type="checkbox" checked={spec.spring?.skipTests ?? true} onChange={(e) => setSpring('skipTests', e.target.checked)} />
                         <span>Skip tests</span>
+                      </label>
+                    )}
+                    {spec.spring?.mode !== 'run' && (
+                      <label className="check" title="By default the build is skipped when nothing under src/ or in a pom.xml is newer than the jar. Turn this on to run mvn package on every start (for example when a dependency changed in ~/.m2).">
+                        <input type="checkbox" checked={spec.spring?.alwaysBuild ?? false} onChange={(e) => setSpring('alwaysBuild', e.target.checked)} />
+                        <span>Always rebuild</span>
                       </label>
                     )}
                     <label className="check">

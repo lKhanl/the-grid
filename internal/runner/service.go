@@ -241,6 +241,9 @@ func (s *Service) spawn(gen int, cfg config.Service, skipBuild bool) error {
 	if plan.Build != "" {
 		return s.launch(gen, cfg, env, plan, true, plan.Build, plan.BuildCwd)
 	}
+	if plan.Note != "" {
+		s.sys("%s", plan.Note)
+	}
 	return s.runPhase(gen, cfg, env, plan)
 }
 
