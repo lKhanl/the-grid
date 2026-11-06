@@ -100,6 +100,7 @@ export default function App() {
   const [unread, setUnread] = useState<Record<string, 'out' | 'err'>>({})
   const [form, setForm] = useState<{ editing: string | null; group?: string; cwd?: string } | null>(null)
   const [wsOpen, setWsOpen] = useState(false)
+  const noWorkspace = !!state && state.configPath === ''
   const [rtForm, setRtForm] = useState<{ editing: string | null } | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; service: string } | null>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
@@ -384,7 +385,7 @@ export default function App() {
               title={`${state.configPath}\nSwitch workspace`}
               onClick={() => setWsOpen(true)}
             >
-              {state.name || 'workspace'} ▾
+              {state.configPath === '' ? 'Open workspace' : state.name || 'workspace'} ▾
             </button>
           )}
         </div>
@@ -584,7 +585,7 @@ export default function App() {
               })}
             </div>
           ))}
-          {state && services.length === 0 && (
+          {state && state.configPath !== '' && services.length === 0 && (
             <div className="empty">
               No services yet.
               <Btn icon={<PlusIcon size={14} />} label="Add your first service" title="New service" kind="text" onClick={() => setForm({ editing: null })} />
@@ -846,9 +847,10 @@ export default function App() {
         ]
         return <ContextMenu x={menu.x} y={menu.y} title={s.name} items={items} onClose={closeMenu} />
       })()}
-      {wsOpen && state && (
+      {(wsOpen || noWorkspace) && state && (
         <Workspaces
           current={state.configPath}
+          required={noWorkspace}
           onClose={() => setWsOpen(false)}
           onSwitched={(st) => {
             for (const s of st.services) store.set(s.name, [])

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -39,9 +40,15 @@ func (m *Manager) ConfigPath() string {
 }
 
 // ConfigDir is the directory relative paths are resolved against.
+// With no workspace open it is the user's home folder.
 func (m *Manager) ConfigDir() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.cfg.Dir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	}
 	return m.cfg.Dir
 }
 
@@ -190,6 +197,9 @@ func (m *Manager) Reload() error {
 	m.mu.RLock()
 	path := m.cfg.Path
 	m.mu.RUnlock()
+	if path == "" {
+		return errors.New("no workspace open")
+	}
 	cfg, err := config.Load(path)
 	if err != nil {
 		return err

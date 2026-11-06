@@ -5,6 +5,8 @@ import { FolderPicker } from './FolderPicker'
 
 interface Props {
   current: string
+  /** no workspace is open yet: say so, and keep the dialog until one is picked */
+  required?: boolean
   onClose: () => void
   /** called with the new state after a successful switch */
   onSwitched: (state: State) => void
@@ -19,7 +21,7 @@ function ago(ms: number) {
 }
 
 /** Pick which grid.yaml (workspace) the Grid runs. Recent ones come from ~/.grid. */
-export function Workspaces({ current, onClose, onSwitched }: Props) {
+export function Workspaces({ current, required, onClose, onSwitched }: Props) {
   const [recent, setRecent] = useState<Workspace[]>([])
   const [typed, setTyped] = useState('')
   const [browse, setBrowse] = useState(false)
@@ -32,7 +34,7 @@ export function Workspaces({ current, onClose, onSwitched }: Props) {
   }, [])
 
   const open = async (path: string) => {
-    if (path === current) return onClose()
+    if (path === current && path !== '') return onClose()
     setBusy(true)
     setErr(null)
     try {
@@ -47,19 +49,21 @@ export function Workspaces({ current, onClose, onSwitched }: Props) {
   return (
     <div
       className="modal-backdrop"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-      onKeyDown={(e) => e.key === 'Escape' && !browse && onClose()}
+      onMouseDown={(e) => e.target === e.currentTarget && !required && onClose()}
+      onKeyDown={(e) => e.key === 'Escape' && !browse && !required && onClose()}
     >
       <div className="modal modal-narrow" role="dialog" aria-modal="true">
         <div className="modal-head">
           <h2>Workspaces</h2>
           <div className="spacer" />
-          <button className="btn" title="Close (Esc)" onClick={onClose}>
-            <CloseIcon />
-          </button>
+          {!required && (
+            <button className="btn" title="Close (Esc)" onClick={onClose}>
+              <CloseIcon />
+            </button>
+          )}
         </div>
         <div className="picker-list">
-          {recent.length === 0 && <div className="muted picker-msg">No other workspaces yet. Open a grid.yaml below.</div>}
+          {recent.length === 0 && <div className="muted picker-msg">No workspace is open yet. Open a workspace file below.</div>}
           {recent.map((w) => (
             <div key={w.path} className="picker-row" style={{ cursor: 'pointer' }} onClick={() => !busy && open(w.path)}>
               <span className="rt-icon picker-folder">
@@ -106,7 +110,7 @@ export function Workspaces({ current, onClose, onSwitched }: Props) {
         </div>
         <div className="modal-foot">
           <span className={err ? 'field-error' : 'muted small'}>
-            {err ?? 'Switching stops every running service of the current workspace.'}
+            {err ?? (required ? 'Pick the .yml / .yaml file that describes your services.' : 'Switching stops every running service of the current workspace.')}
           </span>
         </div>
       </div>

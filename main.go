@@ -123,16 +123,15 @@ func serve(args []string) error {
 		fmt.Fprintln(os.Stderr, "warning: no ~/.grid state (recent workspaces disabled):", err)
 		store = nil
 	}
-	path, err := pickWorkspace(*cfgPath, store)
-	if err != nil {
-		return err
-	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		return err
-	}
-	if store != nil {
-		store.Touch(cfg.Path, cfg.Name)
+	path := pickWorkspace(*cfgPath, store)
+	cfg := config.Empty()
+	if path != "" {
+		if cfg, err = config.Load(path); err != nil {
+			return err
+		}
+		if store != nil {
+			store.Touch(cfg.Path, cfg.Name)
+		}
 	}
 	runner.Version = version
 	m := runner.NewManager(cfg)
@@ -149,8 +148,12 @@ func serve(args []string) error {
 	terms = term.NewManager(func() { m.Hub.Publish(runner.Event{Type: "terms", Terms: terms.List()}) })
 	srv := &http.Server{Handler: server.New(m, terms, store, ui), ReadHeaderTimeout: 10 * time.Second}
 	url := fmt.Sprintf("http://localhost:%d", *port)
+	shown := cfg.Path
+	if shown == "" {
+		shown = "(none yet: pick a workspace in the UI)"
+	}
 	fmt.Printf("THE GRID %s\n  config : %s\n  ui     : %s\n  %d programs on the grid. Ctrl+C: end of line (stops everything).\n",
-		version, cfg.Path, url, len(cfg.Services))
+		version, shown, url, len(cfg.Services))
 
 	go srv.Serve(ln)
 	m.Autostart()
@@ -177,17 +180,18 @@ func serve(args []string) error {
 }
 
 // pickWorkspace decides which grid.yaml to start with: an explicit -c wins,
-// then the last workspace opened (remembered in ~/.grid).
-func pickWorkspace(explicit string, store *state.Store) (string, error) {
+// then the last workspace opened (remembered in ~/.grid). "" means none: the
+// Grid starts empty and the UI asks which workspace to open.
+func pickWorkspace(explicit string, store *state.Store) string {
 	if explicit != "" {
-		return explicit, nil
+		return explicit
 	}
 	if store != nil {
 		if p, ok := store.Last(); ok {
-			return p, nil
+			return p
 		}
 	}
-	return "", fmt.Errorf("no previously opened workspace\nstart with: grid -c <grid.yaml> (see grid.example.yaml)")
+	return ""
 }
 
 func openBrowser(url string) {

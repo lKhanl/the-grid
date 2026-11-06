@@ -25,6 +25,11 @@ type Config struct {
 	Dir          string // directory of the loaded file
 }
 
+// Empty is the config of "no workspace open": no services, no file.
+func Empty() *Config {
+	return &Config{Runtimes: map[string]*Runtime{}}
+}
+
 // Runtime is a named tool installation (a JDK, Maven, Node, ...) that
 // services can opt into instead of whatever is on the system PATH.
 type Runtime struct {
