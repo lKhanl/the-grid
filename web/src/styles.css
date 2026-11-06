@@ -452,3 +452,44 @@ details.form-section[open] summary { margin-bottom: 10px; }
 .shortcut-group .hint .keys { width: 96px; }
 .version { align-self: center; color: var(--muted); font-size: 12px; font-weight: 500; letter-spacing: .02em; padding: 1px 7px; border: 1px solid var(--border); border-radius: 9px; }
 .settings-version { display: block; margin-top: 6px; font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 12px; }
+
+/* ---- git changes ---- */
+.add { color: var(--green); font-weight: 600; }
+.del { color: var(--red); font-weight: 600; }
+.git-row { display: flex; align-items: center; gap: 7px; min-height: 30px; padding-right: 12px; cursor: pointer; user-select: none; }
+.git-row:hover { background: var(--hover); }
+.git-file.on { background: var(--sel); }
+.git-proj { min-height: 36px; padding-left: 12px; font-weight: 600; border-top: 1px solid var(--line); }
+.git-project:first-of-type .git-proj { border-top: 0; }
+.git-dir { color: var(--muted); }
+.git-dir .fname { color: var(--text); }
+.git-type { display: inline-flex; color: var(--accent); }
+.git-count { min-width: 18px; text-align: center; font-size: 11.5px; color: var(--muted); background: var(--chip); border-radius: 9px; padding: 0 6px; }
+.git-name { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden; white-space: nowrap; }
+.git-name .fname { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.git-name .fdir { color: var(--muted); font-size: 12px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+.git-num { display: inline-flex; gap: 6px; font-size: 12.5px; white-space: nowrap; font-weight: 400; }
+.git-status { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; border-radius: 4px; font-size: 12px; font-weight: 700; color: var(--bg); background: var(--muted); }
+.git-status.st-M { background: var(--yellow); }
+.git-status.st-A, .git-status.st-U { background: var(--green); }
+.git-status.st-D { background: var(--red); }
+.icon-btn.spin svg { animation: git-spin 1s linear infinite; }
+@keyframes git-spin { to { transform: rotate(360deg); } }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: none; color: var(--muted); padding: 5px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.seg button.on { background: var(--on); color: var(--text); }
+.diff-body { flex: 1; overflow: auto; background: var(--sunk); font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, Menlo, monospace; font-size: 13px; line-height: 1.5; }
+.diff-note { padding: 18px 20px; color: var(--muted); font-family: inherit; }
+.hunk-head { position: sticky; top: 0; z-index: 1; padding: 3px 14px; color: var(--muted); background: var(--panel); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hunk:first-child .hunk-head { border-top: 0; }
+table.diff { width: 100%; border-collapse: collapse; table-layout: fixed; }
+table.diff col.num { width: 52px; }
+table.diff td { padding: 0 8px; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+table.diff td.num { text-align: right; color: var(--muted); user-select: none; padding: 0 8px; background: var(--panel); opacity: .85; }
+table.diff.split td.code:nth-child(2) { border-right: 1px solid var(--border); }
+table.diff td.code.empty { background: color-mix(in srgb, var(--muted) 8%, transparent); }
+table.diff td.add, table.diff tr.add td { background: color-mix(in srgb, var(--green) 20%, transparent); }
+table.diff td.del, table.diff tr.del td { background: color-mix(in srgb, var(--red) 20%, transparent); }
+table.diff td.num.add, table.diff tr.add td.num { background: color-mix(in srgb, var(--green) 32%, var(--panel)); color: var(--text); }
+table.diff td.num.del, table.diff tr.del td.num { background: color-mix(in srgb, var(--red) 32%, var(--panel)); color: var(--text); }
+table.diff .sign { display: inline-block; width: 1.2ch; margin-right: 1ch; color: var(--muted); user-select: none; }

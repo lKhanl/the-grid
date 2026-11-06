@@ -1,16 +1,17 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { act, closeTerm, deleteService, openTerm, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State, type TermInfo } from './api'
 import { LogView } from './LogView'
-import { ChevronIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, JarIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon, TerminalIcon } from './icons'
+import { ChangesIcon, ChevronIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, JarIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon, TerminalIcon } from './icons'
 import { ServiceForm } from './ServiceForm'
 import { RuntimeForm } from './RuntimeForm'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
 import { NeonBorder } from './NeonBorder'
 import { applyTheme, loadTheme, type Theme } from './theme'
+import { ChangesList, DiffPane, useGit } from './Changes'
 import { loadPrefs, TermPanel, type NewTermPrefs } from './Terminals'
 
 const ACTIVE = new Set(['starting', 'building', 'running', 'stopping'])
-type Panel = 'services' | 'runtimes' | 'settings'
+type Panel = 'services' | 'changes' | 'runtimes' | 'settings'
 
 const SHORTCUTS: [string, [string[], string][]][] = [
   [
@@ -128,8 +129,9 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [panel, setPanel] = useState<Panel>(() => {
     const p = localStorage.getItem('grid.panel')
-    return p === 'runtimes' || p === 'settings' ? p : 'services'
+    return p === 'runtimes' || p === 'settings' || p === 'changes' ? p : 'services'
   })
+  const git = useGit(panel === 'changes')
   const [terms, setTerms] = useState<TermInfo[]>([])
   const [selectedTerm, setSelectedTerm] = useState<string | null>(() => localStorage.getItem('grid.term'))
   const [termOpen, setTermOpen] = useState(() => localStorage.getItem('grid.term.open') === 'on')
@@ -407,6 +409,15 @@ export default function App() {
             {runningCount > 0 && <span className="activity-badge">{runningCount}</span>}
           </button>
           <button
+            className={`activity ${panel === 'changes' ? 'on' : ''}`}
+            aria-label="Changes"
+            onClick={() => setPanel('changes')}
+          >
+            <ChangesIcon size={22} />
+            <span className="activity-tip">Changes (git diff)</span>
+            {git.total > 0 && <span className="activity-badge">{git.total}</span>}
+          </button>
+          <button
             className={`activity ${panel === 'runtimes' ? 'on' : ''}`}
             aria-label="Runtimes"
             onClick={() => setPanel('runtimes')}
@@ -569,6 +580,8 @@ export default function App() {
             </div>
           )}
             </>
+          ) : panel === 'changes' ? (
+            <ChangesList git={git} typeIcon={(t) => { const I = TYPE_ICONS[t as keyof typeof TYPE_ICONS] ?? CodeIcon; return <I size={15} /> }} />
           ) : panel === 'settings' ? (
             <>
               <div className="sidebar-head divided">
@@ -676,7 +689,8 @@ export default function App() {
           )}
         </aside>
         <section className="detail">
-          <div className="detail-pane" style={{ display: termOpen && termMax ? 'none' : 'flex' }}>
+          {panel === 'changes' && !(termOpen && termMax) && <DiffPane git={git} />}
+          <div className="detail-pane" style={{ display: (termOpen && termMax) || panel === 'changes' ? 'none' : 'flex' }}>
           {current ? (
             <div className="toolbar">
               <StatusIcon status={current.status} type={current.type} size={18} />

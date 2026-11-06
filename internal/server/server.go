@@ -29,6 +29,7 @@ const CSRFHeader = "X-Grid"
 func New(m *runner.Manager, terms *term.Manager, ui fs.FS) http.Handler {
 	mux := http.NewServeMux()
 	termRoutes(mux, m, terms)
+	gitRoutes(mux, m)
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, m.State())
 	})

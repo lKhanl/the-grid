@@ -398,3 +398,38 @@ export async function closeTerm(id: string) {
 export function termSocketURL(id: string) {
   return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/terms/${encodeURIComponent(id)}/ws`
 }
+
+// ---- git changes (read-only) ----
+export interface GitFile {
+  path: string // relative to the repository root
+  status: 'M' | 'A' | 'D' | 'U'
+  staged: boolean
+  additions: number
+  deletions: number
+  binary?: boolean
+}
+
+export interface GitProject {
+  key: string
+  name: string
+  services: string[]
+  types: string[]
+  root: string
+  prefix: string // project folder inside the repository ("" = the root)
+  branch: string
+  files: GitFile[]
+}
+
+export interface GitDiff {
+  diff: string
+  binary?: boolean
+  truncated?: boolean
+}
+
+export async function gitChanges(): Promise<{ projects: GitProject[]; error?: string }> {
+  return (await check(await fetch('/api/git/changes'))).json()
+}
+
+export async function gitDiff(repo: string, path: string): Promise<GitDiff> {
+  return (await check(await fetch(`/api/git/diff?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(path)}`))).json()
+}

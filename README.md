@@ -27,6 +27,7 @@ need 3–4 APIs, UIs and scripts running side by side with their logs one click 
   builds, then runs — no command to write
 - Add / edit / delete services and runtimes from the UI (writes `grid.yaml`, keeps comments)
 - Several JDKs / Node versions side by side (`runtimes`), one per service
+- **Changes** view: read-only git diff per service (files as a tree, side-by-side or unified) to review what an AI agent wrote
 - Live colored logs (xterm.js), filter, 10k lines per service
 - `depends_on` + readiness (`port` or log regex) so things start in order
 - Restart policies (`on-failure`, `always`)
