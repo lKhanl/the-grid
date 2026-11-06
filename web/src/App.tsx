@@ -153,6 +153,9 @@ export default function App() {
   const filterRef = useRef<HTMLInputElement>(null)
   const selectedRef = useRef(selected)
   selectedRef.current = selected
+  const selectedCwd = state?.services.find((s) => s.name === selected)?.cwd ?? ''
+  const selectedCwdRef = useRef(selectedCwd)
+  selectedCwdRef.current = selectedCwd
 
   useEffect(() => {
     if (selected) localStorage.setItem('grid.selected', selected)
@@ -205,7 +208,10 @@ export default function App() {
         // ones (after a config change) don't, and the buffers stay as they are.
         // (set, not merge: after a server restart line numbers start again)
         if (ev.logs) for (const s of st.services) store.set(s.name, ev.logs[s.name] ?? [])
-        if (ev.terms) setTerms(ev.terms)
+        if (ev.terms) {
+          termsLoaded.current = true
+          setTerms(ev.terms)
+        }
       } else if (ev.type === 'terms') {
         setTerms(ev.terms ?? [])
       } else if (ev.type === 'service' && ev.info) {
@@ -241,16 +247,24 @@ export default function App() {
     [store],
   )
 
+  const opening = useRef(false) // an open request is in flight (keeps the auto-open and a click from both spawning)
+  const termsLoaded = useRef(false)
   const newTerm = useCallback((o: { service?: string } & Partial<NewTermPrefs>) => {
+    if (opening.current) return
+    opening.current = true
     setError(null)
-    openTerm({ shell: o.shell || undefined, runtimes: o.runtimes, cwd: o.cwd || undefined, service: o.service }).then(
+    // A new terminal starts in the folder of the service whose log is open (unless it is opened for a specific service).
+    const cwd = o.cwd || (o.service ? '' : selectedCwdRef.current)
+    openTerm({ shell: o.shell || undefined, runtimes: o.runtimes, cwd: cwd || undefined, service: o.service }).then(
       (t) => {
         setTerms((list) => (list.some((x) => x.id === t.id) ? list : [...list, t]))
         setSelectedTerm(t.id)
         setTermOpen(true)
       },
       (e) => setError(`terminal: ${e.message}`),
-    )
+    ).finally(() => {
+      opening.current = false
+    })
   }, [])
   const killTerm = useCallback((id: string) => {
     setTerms((list) => {
@@ -258,10 +272,16 @@ export default function App() {
       const next = list.filter((t) => t.id !== id)
       // select the neighbour tab, like an editor does
       setSelectedTerm((cur) => (cur === id ? (next[Math.min(i, next.length - 1)]?.id ?? null) : cur))
+      if (!next.length) setTermOpen(false) // no terminals left: nothing to show
       return next
     })
     closeTerm(id).catch(() => {}) // already gone is fine
   }, [])
+
+  // The panel is never empty: shown with no terminal at all (also after a restart with the panel left open), it opens one.
+  useEffect(() => {
+    if (termOpen && termsLoaded.current && terms.length === 0) newTerm(loadPrefs())
+  }, [termOpen, terms, newTerm])
 
   // Ctrl+` shows / hides the terminals (opening one if none is running), Ctrl+Shift+` opens a new one.
   const termsRef = useRef(terms)
@@ -817,6 +837,7 @@ export default function App() {
             <TermPanel
               open={termOpen}
               state={state}
+              defaultCwd={selectedCwd}
               terms={terms}
               selected={selectedTerm}
               theme={theme}

@@ -3,7 +3,7 @@ import { listDir, type DirListing } from './api'
 import { CloseIcon, FileIcon, FolderIcon, JavaIcon, NodeIcon, UpIcon } from './icons'
 
 interface Props {
-  /** where to start; "" = the config folder, "~" = the user's home */
+  /** where to start; "~" = the user's home (all pickers use it), "" = the config folder */
   start: string
   title?: string
   /** also list *.yml / *.yaml files; clicking one picks it (no "use this folder") */

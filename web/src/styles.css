@@ -449,7 +449,6 @@ details.form-section[open] summary { margin-bottom: 10px; }
 .term-host { flex: 1; min-width: 0; padding: 4px 0 0 10px; background: var(--bg); }
 .term-host .xterm { height: 100%; }
 .term-host .xterm-viewport { background: var(--bg) !important; }
-.term-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
 .term-new { position: absolute; right: 8px; top: 38px; z-index: 20; width: 340px; padding: 12px 12px 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); box-shadow: 0 8px 28px rgba(0,0,0,.45); }
 .term-new.up { top: auto; bottom: 40px; }
 .term-new-title { font-weight: 600; margin-bottom: 10px; }

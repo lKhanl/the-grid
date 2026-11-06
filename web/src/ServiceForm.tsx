@@ -832,7 +832,7 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
         />
       )}
       {picker && spec && (
-        <FolderPicker start={cwdInfo?.dir ? cwdInfo.path : ''} onClose={() => setPicker(false)} onPick={pickFolder} />
+        <FolderPicker start="~" onClose={() => setPicker(false)} onPick={pickFolder} />
       )}
     </div>
   )

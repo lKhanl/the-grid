@@ -42,14 +42,15 @@ export interface NewTermPrefs {
 export function loadPrefs(): NewTermPrefs {
   try {
     const p = JSON.parse(localStorage.getItem('grid.term.new') ?? '{}')
-    return { shell: p.shell ?? '', runtimes: Array.isArray(p.runtimes) ? p.runtimes : [], cwd: p.cwd ?? '' }
+    // the folder is not remembered: empty means "the selected service's folder"
+    return { shell: p.shell ?? '', runtimes: Array.isArray(p.runtimes) ? p.runtimes : [], cwd: '' }
   } catch {
     return { shell: '', runtimes: [], cwd: '' }
   }
 }
 
 function savePrefs(p: NewTermPrefs) {
-  localStorage.setItem('grid.term.new', JSON.stringify(p))
+  localStorage.setItem('grid.term.new', JSON.stringify({ shell: p.shell, runtimes: p.runtimes }))
 }
 
 // ---- new-terminal form (dropdown under the panel's chevron) ----
@@ -58,11 +59,13 @@ interface FormProps {
   /** open upwards (over the log) when the panel is too low for it */
   up: boolean
   state: State | null
+  /** folder of the selected service: where an empty Folder field opens */
+  defaultCwd: string
   onOpen: (p: NewTermPrefs) => void
   onCancel: () => void
 }
 
-function NewTermForm({ up, state, onOpen, onCancel }: FormProps) {
+function NewTermForm({ up, state, defaultCwd, onOpen, onCancel }: FormProps) {
   const [shells, setShells] = useState<ShellInfo[]>([])
   const [prefs, setPrefs] = useState<NewTermPrefs>(loadPrefs)
   const configDir = state?.configPath.replace(/[\\/][^\\/]*$/, '') ?? ''
@@ -132,7 +135,7 @@ function NewTermForm({ up, state, onOpen, onCancel }: FormProps) {
       )}
       <label className="field">
         <span>Folder</span>
-        <input value={prefs.cwd} placeholder={configDir} onChange={(e) => setPrefs({ ...prefs, cwd: e.target.value })} />
+        <input value={prefs.cwd} placeholder={defaultCwd || configDir} onChange={(e) => setPrefs({ ...prefs, cwd: e.target.value })} />
       </label>
       <div className="term-new-actions">
         <button type="button" className="btn text small" onClick={onCancel}>
@@ -160,6 +163,7 @@ interface PanelProps {
   /** hidden panels stay mounted so the shells' screens survive */
   open: boolean
   state: State | null
+  defaultCwd: string
   terms: TermInfo[]
   selected: string | null
   theme: Theme
@@ -176,7 +180,7 @@ function statusClass(t: TermInfo) {
 }
 
 /** VS Code style panel under the log; drag its top edge to resize. Every terminal stays mounted so screens and sockets survive switching. */
-export function TermPanel({ open, state, terms, selected, theme, maximized, onMaximize, onSelect, onKill, onNew, onHide }: PanelProps) {
+export function TermPanel({ open, state, defaultCwd, terms, selected, theme, maximized, onMaximize, onSelect, onKill, onNew, onHide }: PanelProps) {
   const titles = useMemo(() => termTitles(terms), [terms])
   const current = terms.find((t) => t.id === selected) ?? null
   const [height, setHeight] = useState(loadHeight)
@@ -292,6 +296,7 @@ export function TermPanel({ open, state, terms, selected, theme, maximized, onMa
           <NewTermForm
             up={!maximized && height < 400}
             state={state}
+            defaultCwd={defaultCwd}
             onCancel={closeForm}
             onOpen={(p) => {
               setAdding(false)
@@ -304,14 +309,6 @@ export function TermPanel({ open, state, terms, selected, theme, maximized, onMa
         {terms.map((t) => (
           <TermScreen key={t.id} id={t.id} shown={open && t.id === selected} theme={theme} />
         ))}
-        {terms.length === 0 && (
-          <div className="term-empty">
-            <button className="btn text" onClick={() => onNew(loadPrefs())}>
-              <TerminalIcon size={16} />
-              <span>Open a terminal</span>
-            </button>
-          </div>
-        )}
       </div>
     </div>
   )
