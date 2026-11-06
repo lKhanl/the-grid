@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/lKhanl/the-grid/internal/config"
+	"github.com/lKhanl/the-grid/internal/db"
 	"github.com/lKhanl/the-grid/internal/mcp"
 	"github.com/lKhanl/the-grid/internal/runner"
 	"github.com/lKhanl/the-grid/internal/server"
@@ -156,7 +158,14 @@ func serve(args []string) error {
 	}
 	var terms *term.Manager
 	terms = term.NewManager(func() { m.Hub.Publish(runner.Event{Type: "terms", Terms: terms.List()}) })
-	srv := &http.Server{Handler: server.New(m, terms, store, ui), ReadHeaderTimeout: 10 * time.Second}
+	dbHome, err := state.Dir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "warning: no ~/.grid (database connections are kept in the temp folder):", err)
+		dbHome = filepath.Join(os.TempDir(), ".grid")
+	}
+	dbm := db.NewManager(db.OpenStore(dbHome))
+	defer dbm.Close()
+	srv := &http.Server{Handler: server.New(m, terms, store, dbm, ui), ReadHeaderTimeout: 10 * time.Second}
 	url := fmt.Sprintf("http://localhost:%d", *port)
 	shown := cfg.Path
 	if shown == "" {

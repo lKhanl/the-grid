@@ -63,9 +63,9 @@ export interface RunnerEvent {
 
 export type Action = 'start' | 'stop' | 'restart' | 'clear' | 'start-nobuild'
 
-const HEADERS = { 'X-Grid': 'ui' }
+export const HEADERS = { 'X-Grid': 'ui' }
 
-async function check(r: Response) {
+export async function check(r: Response) {
   if (!r.ok) {
     let msg = r.statusText
     try {

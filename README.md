@@ -104,6 +104,38 @@ The Grid itself must be running (`grid`). Register it in the agent's MCP config,
 
 Without MCP the same works through the CLI (`grid status`, `grid logs <svc> -n 100`, `grid restart <svc>`).
 
+## Database panel
+
+A small SQL client for Oracle 19c (pure Go driver: no Oracle client to install; one exe is enough).
+Open the **Database** panel (cylinder icon): add a connection (host + port + service name, or SID, or a TNS
+descriptor / alias from `tnsnames.ora`), test it, then browse schemas, tables and columns on the left and run
+SQL on the right (`Ctrl+Enter` runs the selection, or everything: several statements separated by `;` run one after the other, each result in its own tab, stopping at the first error; a PL/SQL block ends with a `/` line). `Ctrl+Shift+Enter` runs only the statement under the cursor. The editor suggests tables, views, schemas and columns from the database as you type (`FROM emp…`, `e.` after an alias). Big results are paged with Prev / Next. Results are a scrolling grid you can copy
+or download as CSV; `Stop` cancels a running statement.
+
+- **Commit and rollback:** by default changes wait for **Commit** / **Rollback** (a yellow bar reminds you).
+  Tick "Commit every statement automatically" on the connection if you prefer that.
+- **Where connections live:** `~/.grid/connections.json`, per user, not in `grid.yaml`. Passwords are stored as
+  plain text there (the file is readable by your user only).
+- **Only Oracle for now**; the code is split so PostgreSQL can be added later.
+
+### Sharing a database with AI (MCP)
+
+Each connection has an **AI access (MCP)** setting: *Read-only* (default), *Read and write*, or *Not shared*.
+`grid mcp` then offers these tools for the shared connections:
+
+| tool | what it does |
+|---|---|
+| `db_list` | the shared connections and whether the AI may change data |
+| `db_tables` | find tables and views (name fragment, schema or `*` for all) |
+| `db_describe` | columns, primary / unique / foreign keys, indexes, comments of one table |
+| `db_query` | one `SELECT` / `WITH`, result as small plain text (row and size limits) |
+| `db_execute` | `INSERT` / `UPDATE` / `DELETE` / DDL, committed on success; only on *Read and write* connections |
+
+Read-only is enforced by the Grid, not by trusting the agent: the statement must be a single `SELECT` / `WITH`
+without `FOR UPDATE`, it runs inside `SET TRANSACTION READ ONLY` and is always rolled back, and anything else is
+refused before it reaches the database. A separate read-only database user is still the strongest protection.
+Everything the AI reads goes to your model provider; there is no masking, so share only what you may.
+
 ## Adding and editing services in the UI
 
 **New** (sidebar, or `N`), the **+** on a group header, **✎** on a row, right-click → **Edit**,

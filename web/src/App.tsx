@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { act, closeTerm, setLogLines, deleteService, openTerm, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State, type TermInfo } from './api'
 import { LogView } from './LogView'
-import { ChangesIcon, ChevronIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, JarIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon, TerminalIcon } from './icons'
+import { ChangesIcon, ChevronIcon, DatabaseIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, JarIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon, TerminalIcon } from './icons'
 import { ServiceForm } from './ServiceForm'
 import { RuntimeForm } from './RuntimeForm'
 import { Workspaces } from './Workspaces'
@@ -9,10 +9,11 @@ import { ContextMenu, type MenuEntry } from './ContextMenu'
 import { NeonBorder } from './NeonBorder'
 import { applyTheme, loadTheme, type Theme } from './theme'
 import { ChangesList, DiffPane, useGit } from './Changes'
+import { DbForm, DbSidebar, DbWorkbench, useDatabase } from './Database'
 import { loadPrefs, TermPanel, type NewTermPrefs } from './Terminals'
 
 const ACTIVE = new Set(['starting', 'building', 'running', 'stopping'])
-type Panel = 'services' | 'changes' | 'runtimes' | 'settings'
+type Panel = 'services' | 'changes' | 'database' | 'runtimes' | 'settings'
 
 const SHORTCUTS: [string, [string[], string][]][] = [
   [
@@ -143,9 +144,10 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [panel, setPanel] = useState<Panel>(() => {
     const p = localStorage.getItem('grid.panel')
-    return p === 'runtimes' || p === 'settings' || p === 'changes' ? p : 'services'
+    return p === 'runtimes' || p === 'settings' || p === 'changes' || p === 'database' ? p : 'services'
   })
   const git = useGit(panel === 'changes')
+  const dbs = useDatabase(panel === 'database')
   const [terms, setTerms] = useState<TermInfo[]>([])
   const [selectedTerm, setSelectedTerm] = useState<string | null>(() => localStorage.getItem('grid.term'))
   const [termOpen, setTermOpen] = useState(() => localStorage.getItem('grid.term.open') === 'on')
@@ -181,7 +183,7 @@ export default function App() {
       if (h === 'new' || h.startsWith('new=')) setForm({ editing: null, group: h.slice(4) || undefined })
       else if (h.startsWith('new-dir=')) setForm({ editing: null, cwd: h.slice(8) })
       else if (h.startsWith('edit=')) setForm({ editing: h.slice(5) })
-      else if (h === 'runtimes' || h === 'services' || h === 'settings') setPanel(h)
+      else if (h === 'runtimes' || h === 'services' || h === 'settings' || h === 'database') setPanel(h)
       else if (h === 'terminal') setTermOpen(true)
       else if (h === 'theme=basic' || h === 'theme=grid') setTheme(h.slice(6) as Theme)
       else if (h.startsWith('select=')) setSelected(h.slice(7))
@@ -355,7 +357,10 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if (form || rtForm || menu) return // the forms and the menu handle their own keys
       const typing =
-        e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement ||
+        (e.target instanceof HTMLElement && e.target.isContentEditable) // the SQL editor
       if (e.key === 'Escape' && e.target instanceof HTMLInputElement) {
         setFilter('')
         ;(e.target as HTMLInputElement).blur()
@@ -459,6 +464,15 @@ export default function App() {
             <ChangesIcon size={22} />
             <span className="activity-tip">Changes (git diff)</span>
             {git.total > 0 && <span className="activity-badge">{git.total}</span>}
+          </button>
+          <button
+            className={`activity ${panel === 'database' ? 'on' : ''}`}
+            aria-label="Database"
+            onClick={() => setPanel('database')}
+          >
+            <DatabaseIcon size={22} />
+            <span className="activity-tip">Database</span>
+            {dbs.conns.some((c) => c.inTx) && <span className="activity-badge warn">!</span>}
           </button>
           <button
             className={`activity ${panel === 'runtimes' ? 'on' : ''}`}
@@ -623,6 +637,8 @@ export default function App() {
             </div>
           )}
             </>
+          ) : panel === 'database' ? (
+            <DbSidebar dbs={dbs} />
           ) : panel === 'changes' ? (
             <ChangesList git={git} typeIcon={(t) => { const I = TYPE_ICONS[t as keyof typeof TYPE_ICONS] ?? CodeIcon; return <I size={15} /> }} />
           ) : panel === 'settings' ? (
@@ -756,7 +772,8 @@ export default function App() {
         </aside>
         <section className="detail">
           {panel === 'changes' && !(termOpen && termMax) && <DiffPane git={git} />}
-          <div className="detail-pane" style={{ display: (termOpen && termMax) || panel === 'changes' ? 'none' : 'flex' }}>
+          {panel === 'database' && !(termOpen && termMax) && <DbWorkbench dbs={dbs} />}
+          <div className="detail-pane" style={{ display: (termOpen && termMax) || panel === 'changes' || panel === 'database' ? 'none' : 'flex' }}>
           {current ? (
             <div className="toolbar">
               <StatusIcon status={current.status} type={current.type} size={18} />
@@ -914,6 +931,7 @@ export default function App() {
           }}
         />
       )}
+      {dbs.form && <DbForm editing={dbs.form.editing} onClose={dbs.closeForm} onSaved={dbs.saved} />}
       {rtForm && state && <RuntimeForm state={state} editing={rtForm.editing} onClose={() => setRtForm(null)} onDone={() => setRtForm(null)} />}
     </div>
   )

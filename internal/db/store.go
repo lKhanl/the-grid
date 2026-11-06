@@ -1,0 +1,210 @@
+// Package db is Grid's small database client: saved connections, an Oracle
+// driver (pure Go, no Oracle client needed), a SQL session with commit and
+// rollback, schema browsing, and the guarded access used by MCP.
+package db
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+)
+
+// MCP access levels of a connection.
+const (
+	MCPOff       = "off"       // the AI does not see the connection
+	MCPReadOnly  = "readonly"  // SELECT / WITH only, in a read-only transaction (default)
+	MCPReadWrite = "readwrite" // the AI may also run INSERT / UPDATE / DDL
+)
+
+// Connection modes.
+const (
+	ModeService = "service" // host + port + service name
+	ModeSID     = "sid"     // host + port + SID
+	ModeTNS     = "tns"     // a full (DESCRIPTION=...) or an alias from tnsnames.ora
+)
+
+// Conn is a saved connection. Passwords are stored as plain text in
+// ~/.grid/connections.json (readable by this user only).
+type Conn struct {
+	Name       string `json:"name"`
+	Kind       string `json:"kind"` // oracle (postgres later)
+	Mode       string `json:"mode"`
+	Host       string `json:"host,omitempty"`
+	Port       int    `json:"port,omitempty"`
+	Service    string `json:"service,omitempty"`
+	SID        string `json:"sid,omitempty"`
+	TNS        string `json:"tns,omitempty"`      // descriptor, or an alias looked up in tnsnames.ora
+	TNSAdmin   string `json:"tnsAdmin,omitempty"` // folder with tnsnames.ora (default: $TNS_ADMIN)
+	User       string `json:"user"`
+	Password   string `json:"password,omitempty"`
+	AutoCommit bool   `json:"autoCommit"`
+	MCP        string `json:"mcp"`
+}
+
+// View is a Conn as the UI sees it: never with the password.
+type View struct {
+	Conn
+	Password    string `json:"-"`
+	HasPassword bool   `json:"hasPassword"`
+	Connected   bool   `json:"connected"`
+	InTx        bool   `json:"inTx"` // uncommitted changes in the UI session
+}
+
+var nameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,63}$`)
+
+// Normalize fills defaults and validates.
+func (c *Conn) Normalize() error {
+	c.Name = strings.TrimSpace(c.Name)
+	if !nameRe.MatchString(c.Name) {
+		return errors.New("name: letters, digits, space, _ . - (1-64 characters, starting with a letter or digit)")
+	}
+	if c.Kind == "" {
+		c.Kind = "oracle"
+	}
+	if c.Kind != "oracle" {
+		return fmt.Errorf("kind %q is not supported (oracle)", c.Kind)
+	}
+	if c.Mode == "" {
+		c.Mode = ModeService
+	}
+	c.Host, c.Service, c.SID = strings.TrimSpace(c.Host), strings.TrimSpace(c.Service), strings.TrimSpace(c.SID)
+	c.TNS, c.TNSAdmin, c.User = strings.TrimSpace(c.TNS), strings.TrimSpace(c.TNSAdmin), strings.TrimSpace(c.User)
+	switch c.Mode {
+	case ModeService:
+		if c.Host == "" || c.Service == "" {
+			return errors.New("host and service name are required")
+		}
+	case ModeSID:
+		if c.Host == "" || c.SID == "" {
+			return errors.New("host and SID are required")
+		}
+	case ModeTNS:
+		if c.TNS == "" {
+			return errors.New("a TNS descriptor or alias is required")
+		}
+	default:
+		return fmt.Errorf("mode %q: use service, sid or tns", c.Mode)
+	}
+	if c.Mode != ModeTNS && c.Port == 0 {
+		c.Port = 1521
+	}
+	if c.User == "" {
+		return errors.New("user is required")
+	}
+	switch c.MCP {
+	case "":
+		c.MCP = MCPReadOnly
+	case MCPOff, MCPReadOnly, MCPReadWrite:
+	default:
+		return fmt.Errorf("mcp %q: use off, readonly or readwrite", c.MCP)
+	}
+	return nil
+}
+
+// Store keeps the saved connections in one JSON file.
+type Store struct {
+	mu    sync.Mutex
+	file  string
+	conns []Conn
+}
+
+type storeFile struct {
+	Connections []Conn `json:"connections"`
+}
+
+// OpenStore loads dir/connections.json (a missing or corrupt file means "none").
+func OpenStore(dir string) *Store {
+	s := &Store{file: filepath.Join(dir, "connections.json")}
+	if b, err := os.ReadFile(s.file); err == nil {
+		var f storeFile
+		if json.Unmarshal(b, &f) == nil {
+			s.conns = f.Connections
+		}
+	}
+	return s
+}
+
+func (s *Store) save() error {
+	if err := os.MkdirAll(filepath.Dir(s.file), 0o700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(storeFile{Connections: s.conns}, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := s.file + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.file)
+}
+
+// List returns the connections sorted by name.
+func (s *Store) List() []Conn {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := append([]Conn(nil), s.conns...)
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
+	return out
+}
+
+// Get returns a connection by name (case-insensitive).
+func (s *Store) Get(name string) (Conn, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.conns {
+		if strings.EqualFold(c.Name, name) {
+			return c, true
+		}
+	}
+	return Conn{}, false
+}
+
+// Put adds a connection, or replaces the one called old (rename allowed).
+// An empty password keeps the stored one.
+func (s *Store) Put(old string, c Conn) (Conn, error) {
+	if err := c.Normalize(); err != nil {
+		return c, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx := -1
+	for i, e := range s.conns {
+		if old != "" && strings.EqualFold(e.Name, old) {
+			idx = i
+		} else if strings.EqualFold(e.Name, c.Name) {
+			return c, fmt.Errorf("a connection called %q already exists", c.Name)
+		}
+	}
+	if old != "" && idx < 0 {
+		return c, fmt.Errorf("unknown connection %q", old)
+	}
+	if idx >= 0 {
+		if c.Password == "" {
+			c.Password = s.conns[idx].Password
+		}
+		s.conns[idx] = c
+	} else {
+		s.conns = append(s.conns, c)
+	}
+	return c, s.save()
+}
+
+// Delete forgets a connection.
+func (s *Store) Delete(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.conns {
+		if strings.EqualFold(e.Name, name) {
+			s.conns = append(s.conns[:i], s.conns[i+1:]...)
+			return s.save()
+		}
+	}
+	return fmt.Errorf("unknown connection %q", name)
+}

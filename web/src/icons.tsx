@@ -256,3 +256,11 @@ export const ChangesIcon = ({ size }: P) => (
     <path d="M6 7.7v8.6M18 11.2c0 3.6-3 4.3-8.5 5" />
   </Svg>
 )
+
+export const DatabaseIcon = ({ size }: P) => (
+  <Svg size={size}>
+    <ellipse cx="12" cy="5.5" rx="8" ry="3" />
+    <path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13" />
+    <path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />
+  </Svg>
+)
