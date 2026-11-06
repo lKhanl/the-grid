@@ -58,6 +58,7 @@ type Service struct {
 	exitCode      *int
 	startedAt     time.Time
 	restarts      int
+	launchSeq     uint64 // log position when the latest start began
 	proc          *proc
 	done          chan struct{}
 	stopRequested bool
@@ -100,6 +101,15 @@ func (s *Service) Info() Info {
 
 func (s *Service) Logs(n int) []Entry { return s.logs.Tail(n) }
 
+// LogsSinceStart returns the last n lines logged since the latest start began
+// (the build, the app's output, and Grid's own notes), so an old crash is not mixed in.
+func (s *Service) LogsSinceStart(n int) []Entry {
+	s.mu.Lock()
+	seq := s.launchSeq
+	s.mu.Unlock()
+	return s.logs.After(seq, n)
+}
+
 func (s *Service) ClearLogs() { s.logs.Clear() }
 
 func (s *Service) publish() {
@@ -141,6 +151,7 @@ func (s *Service) start(skipBuild bool) error {
 	}
 	s.gen++
 	gen := s.gen
+	s.launchSeq = s.logs.Seq()
 	s.stopRequested = false
 	s.restarts = 0
 	s.exitCode = nil

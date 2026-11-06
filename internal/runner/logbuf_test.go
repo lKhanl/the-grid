@@ -58,3 +58,25 @@ func cfgWith(name string) *config.Config {
 	c.Services = []config.Service{{Name: name}}
 	return c
 }
+
+func TestLogsSinceStart(t *testing.T) {
+	m := NewManager(cfgWith("a"))
+	s := m.Get("a")
+	s.appendLog("out", "old crash")
+	s.appendLog("out", "old trace")
+	s.mu.Lock()
+	s.launchSeq = s.logs.Seq() // what start() does
+	s.mu.Unlock()
+	s.appendLog("sys", "building")
+	s.appendLog("out", "Started")
+	got := s.LogsSinceStart(0)
+	if len(got) != 2 || got[0].Line != "building" || got[1].Line != "Started" {
+		t.Fatalf("since start: %+v", got)
+	}
+	if got := s.LogsSinceStart(1); len(got) != 1 || got[0].Line != "Started" {
+		t.Fatalf("limited: %+v", got)
+	}
+	if n := len(s.Logs(0)); n != 4 {
+		t.Fatalf("the old lines must stay in the full log, got %d", n)
+	}
+}

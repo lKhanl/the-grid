@@ -47,6 +47,28 @@ func (b *LogBuffer) SetMax(n int) {
 	}
 }
 
+// Seq is the sequence number the next line will get minus one (0 = nothing logged yet).
+func (b *LogBuffer) Seq() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.next
+}
+
+// After returns the last n lines (n <= 0: all) that came after sequence number seq.
+func (b *LogBuffer) After(seq uint64, n int) []Entry {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	i := len(b.entries)
+	for i > 0 && b.entries[i-1].Seq > seq {
+		i--
+	}
+	out := b.entries[i:]
+	if n > 0 && len(out) > n {
+		out = out[len(out)-n:]
+	}
+	return append([]Entry(nil), out...)
+}
+
 func (b *LogBuffer) Tail(n int) []Entry {
 	b.mu.Lock()
 	defer b.mu.Unlock()

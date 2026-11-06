@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -127,7 +128,7 @@ func (s *Server) handle(req request, notify func(string, any)) (any, *rpcError) 
 			"protocolVersion": p.ProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "grid", "version": s.Version},
-			"instructions":    "Controls the services of The Grid. Use restart after changing a service's code, then read the log tail it returns. Builds can be slow: if restart says the service is still building or starting, that is NOT a failure; call wait (never restart again) until it is running.",
+			"instructions":    "Controls the services of The Grid. Use restart after changing a service's code, then read the log tail it returns (only what that start produced). To look into a problem use logs with level=error, grep or since_restart instead of reading many lines; describe tells where a service lives and how it runs. Builds can be slow: if restart says the service is still building or starting, that is NOT a failure; call wait (never restart again) until it is running.",
 		}, nil
 	case "ping":
 		return map[string]any{}, nil
@@ -173,12 +174,27 @@ var tools = []map[string]any{
 	},
 	{
 		"name":        "logs",
-		"description": "Last lines of a service's log (colors removed).",
+		"description": "Last lines of a service's log (colors removed). To save tokens, filter instead of reading everything: level=error shows only errors and exceptions, grep a regex, since_restart only what the latest start produced.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"service":       map[string]any{"type": "string", "description": "service name, see status"},
+				"lines":         map[string]any{"type": "integer", "description": "how many lines (default 100, max 500)"},
+				"level":         map[string]any{"type": "string", "enum": []string{"error", "warn"}, "description": "only lines that look like errors (ERROR, FATAL, exceptions, 'Caused by', FAILED) or, with warn, also warnings"},
+				"grep":          map[string]any{"type": "string", "description": "only lines matching this regular expression (case-insensitive)"},
+				"since_restart": map[string]any{"type": "boolean", "description": "only lines since the latest start / restart (build output included), no old crashes"},
+				"context":       map[string]any{"type": "integer", "description": "with level / grep: also show this many lines after each match, e.g. 5 for a stack trace (default 0, max 20)"},
+			},
+			"required": []string{"service"},
+		},
+	},
+	{
+		"name":        "describe",
+		"description": "Everything known about one service: state, folder, build and run command, URL, readiness check, dependencies, runtimes.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"service": map[string]any{"type": "string", "description": "service name, see status"},
-				"lines":   map[string]any{"type": "integer", "description": "how many lines (default 100, max 500)"},
 			},
 			"required": []string{"service"},
 		},
@@ -216,7 +232,17 @@ func (s *Server) call(name string, args map[string]any, progress func(string)) (
 		return s.status()
 	case "logs":
 		svc, _ := args["service"].(string)
-		return s.logs(svc, intArg(args, "lines", 100, 1, 500))
+		f := logFilter{
+			lines:   intArg(args, "lines", 100, 1, 500),
+			context: intArg(args, "context", 0, 0, 20),
+		}
+		f.level, _ = args["level"].(string)
+		f.grep, _ = args["grep"].(string)
+		f.sinceRestart, _ = args["since_restart"].(bool)
+		return s.logs(svc, f)
+	case "describe":
+		svc, _ := args["service"].(string)
+		return s.describe(svc)
 	case "restart":
 		svc, _ := args["service"].(string)
 		action, _ := args["action"].(string)
@@ -259,13 +285,22 @@ func intArg(args map[string]any, key string, def, min, max int) int {
 // ---- Grid API ----
 
 type info struct {
-	Name      string `json:"name"`
-	Group     string `json:"group"`
-	Status    string `json:"status"`
-	ExitCode  *int   `json:"exitCode"`
-	StartedAt int64  `json:"startedAt"`
-	Type      string `json:"type"`
-	URL       string `json:"url"`
+	Name        string   `json:"name"`
+	Group       string   `json:"group"`
+	Description string   `json:"description"`
+	Status      string   `json:"status"`
+	PID         int      `json:"pid"`
+	ExitCode    *int     `json:"exitCode"`
+	StartedAt   int64    `json:"startedAt"`
+	Restarts    int      `json:"restarts"`
+	Type        string   `json:"type"`
+	Build       string   `json:"build"`
+	Command     string   `json:"command"`
+	Cwd         string   `json:"cwd"`
+	URL         string   `json:"url"`
+	DependsOn   []string `json:"dependsOn"`
+	Ready       string   `json:"ready"`
+	Runtimes    []string `json:"runtimes"`
 }
 
 func (s *Server) get(path string) ([]byte, error) { return s.do("GET", path) }
@@ -358,37 +393,195 @@ const (
 	maxLogText = 8000
 )
 
-// tail returns the last n log lines, shortened so one answer stays small.
-func (s *Server) tail(service string, n int) (string, error) {
-	b, err := s.get(fmt.Sprintf("/api/services/%s/logs?tail=%d", url.PathEscape(service), n))
-	if err != nil {
-		return "", err
+// fetch returns up to n plain log lines (colors removed by the Grid).
+func (s *Server) fetch(service string, n int, sinceStart bool) ([]string, error) {
+	q := fmt.Sprintf("/api/services/%s/logs?tail=%d", url.PathEscape(service), n)
+	if sinceStart {
+		q += "&since=start"
 	}
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	b, err := s.get(q)
+	if err != nil {
+		return nil, err
+	}
+	text := strings.TrimRight(string(b), "\n")
+	if text == "" {
+		return nil, nil
+	}
+	return strings.Split(text, "\n"), nil
+}
+
+// shorten joins lines into one answer that stays small: long lines are cut, and
+// when everything is still too long only the newest part is kept.
+func shorten(lines []string) string {
+	out := make([]string, len(lines))
 	for i, l := range lines {
 		if len(l) > maxLineLen {
-			lines[i] = l[:maxLineLen] + " ..."
+			l = l[:maxLineLen] + " ..."
 		}
+		out[i] = l
 	}
-	text := strings.Join(lines, "\n")
+	text := strings.Join(out, "\n")
 	if len(text) > maxLogText { // keep the newest part
 		text = "... (older lines cut)\n" + text[len(text)-maxLogText:]
 	}
-	return text, nil
+	return text
 }
 
-func (s *Server) logs(service string, n int) (string, error) {
-	if _, err := s.find(service); err != nil {
-		return "", err
-	}
-	text, err := s.tail(service, n)
+// tail returns the last n log lines (since the latest start if asked), shortened.
+func (s *Server) tail(service string, n int, sinceStart bool) (string, error) {
+	lines, err := s.fetch(service, n, sinceStart)
 	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(text) == "" {
-		return "(no log lines yet)", nil
+	return shorten(lines), nil
+}
+
+type logFilter struct {
+	lines        int
+	level, grep  string
+	sinceRestart bool
+	context      int
+}
+
+var (
+	errorRe = regexp.MustCompile(`(?i)(\b(error|fatal|severe|panic|failed|failure)\b|exception\b|caused by:)`)
+	warnRe  = regexp.MustCompile(`(?i)\bwarn(ing)?\b`)
+)
+
+// matcher builds the line test of a filter; nil means "no filter".
+func (f logFilter) matcher() (func(string) bool, error) {
+	var tests []func(string) bool
+	switch f.level {
+	case "":
+	case "error":
+		tests = append(tests, errorRe.MatchString)
+	case "warn":
+		tests = append(tests, func(l string) bool { return errorRe.MatchString(l) || warnRe.MatchString(l) })
+	default:
+		return nil, fmt.Errorf("level must be error or warn")
 	}
-	return text, nil
+	if f.grep != "" {
+		re, err := regexp.Compile("(?i)" + f.grep)
+		if err != nil {
+			return nil, fmt.Errorf("grep is not a valid regular expression: %v", err)
+		}
+		tests = append(tests, re.MatchString)
+	}
+	if len(tests) == 0 {
+		return nil, nil
+	}
+	return func(l string) bool {
+		for _, t := range tests {
+			if !t(l) {
+				return false
+			}
+		}
+		return true
+	}, nil
+}
+
+// filterLines keeps the matching lines (plus `context` lines after each), newest `limit` of them.
+func filterLines(lines []string, match func(string) bool, context, limit int) (out []string, matches int) {
+	keep := make([]bool, len(lines))
+	for i, l := range lines {
+		if match(l) {
+			matches++
+			for k := i; k <= i+context && k < len(lines); k++ {
+				keep[k] = true
+			}
+		}
+	}
+	gap := false
+	for i, l := range lines {
+		if !keep[i] {
+			gap = true
+			continue
+		}
+		if gap && context > 0 && len(out) > 0 { // like grep -A: a "--" between separate groups
+			out = append(out, "--")
+		}
+		gap = false
+		out = append(out, l)
+	}
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	if len(out) > 0 && out[0] == "--" {
+		out = out[1:]
+	}
+	return out, matches
+}
+
+func (s *Server) logs(service string, f logFilter) (string, error) {
+	if _, err := s.find(service); err != nil {
+		return "", err
+	}
+	match, err := f.matcher()
+	if err != nil {
+		return "", err
+	}
+	if match == nil { // plain tail
+		text, err := s.tail(service, f.lines, f.sinceRestart)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(text) == "" {
+			return "(no log lines yet)", nil
+		}
+		return text, nil
+	}
+	// a filter looks through the whole history the Grid keeps, not just the last lines
+	all, err := s.fetch(service, 100000, f.sinceRestart)
+	if err != nil {
+		return "", err
+	}
+	out, matches := filterLines(all, match, f.context, f.lines)
+	where := "in the log"
+	if f.sinceRestart {
+		where = "since the latest start"
+	}
+	if matches == 0 {
+		return fmt.Sprintf("No matching lines %s (%d lines checked).", where, len(all)), nil
+	}
+	head := fmt.Sprintf("%d matching lines %s", matches, where)
+	if matches > f.lines {
+		head += fmt.Sprintf(" (showing the last %d)", f.lines)
+	}
+	return head + ":\n" + shorten(out), nil
+}
+
+func (s *Server) describe(service string) (string, error) {
+	v, err := s.find(service)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s: %s", v.Name, label(*v))
+	if inProgress(v.Status) && v.StartedAt > 0 {
+		fmt.Fprintf(&b, " (for %ds)", int(time.Since(time.UnixMilli(v.StartedAt)).Seconds()))
+	}
+	line := func(k, val string) {
+		if strings.TrimSpace(val) != "" {
+			fmt.Fprintf(&b, "\n%s: %s", k, val)
+		}
+	}
+	line("type", v.Type)
+	line("group", v.Group)
+	line("description", v.Description)
+	line("folder", v.Cwd)
+	line("build", v.Build)
+	line("run", v.Command)
+	line("url", v.URL)
+	line("ready when", v.Ready)
+	line("depends on", strings.Join(v.DependsOn, ", "))
+	line("runtimes", strings.Join(v.Runtimes, ", "))
+	if v.PID > 0 {
+		line("pid", fmt.Sprint(v.PID))
+	}
+	if v.Restarts > 0 {
+		line("auto restarts", fmt.Sprint(v.Restarts))
+	}
+	return b.String(), nil
 }
 
 func (s *Server) restart(service, action string, wait time.Duration, progress func(string)) (string, error) {
@@ -424,7 +617,7 @@ func (s *Server) report(service, action string, oldStart int64, wait time.Durati
 		fmt.Fprintf(&b, " (status: %s)", label(*final))
 	}
 	if action != "stop" {
-		if t, err := s.tail(service, 40); err == nil && strings.TrimSpace(t) != "" {
+		if t, err := s.tail(service, 40, true); err == nil && strings.TrimSpace(t) != "" {
 			b.WriteString("\n--- last log lines ---\n" + t)
 		}
 	}

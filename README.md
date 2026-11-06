@@ -77,13 +77,14 @@ The generated build and run commands are previewed as you edit.
 
 ## For AI agents: `grid mcp`
 
-`grid mcp` is an MCP server (stdio) with four tools, so an agent can run the
+`grid mcp` is an MCP server (stdio) with these tools, so an agent can run the
 edit → restart → read logs loop without you copy-pasting:
 
 | tool | what it does |
 |---|---|
 | `status` | services and their state |
-| `logs` | last N log lines of a service (colors removed) |
+| `logs` | last N log lines of a service (colors removed). Filters save tokens: `level` (error / warn), `grep` (regex), `since_restart`, `context` (lines after each match, for stack traces) |
+| `describe` | one service in full: folder, build and run command, URL, readiness, dependencies, runtimes |
 | `restart` | restart / start / stop, waits until it is running or failed, returns the last log lines |
 | `wait` | keep waiting for a service that `restart` reported as still building / starting |
 

@@ -68,6 +68,9 @@ func New(m *runner.Manager, terms *term.Manager, store *state.Store, ui fs.FS) h
 			n = 200
 		}
 		entries := s.Logs(n)
+		if r.URL.Query().Get("since") == "start" { // only what the latest start produced
+			entries = s.LogsSinceStart(n)
+		}
 		if r.URL.Query().Get("format") == "json" {
 			writeJSON(w, http.StatusOK, entries)
 			return

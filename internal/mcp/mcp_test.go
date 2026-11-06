@@ -172,3 +172,139 @@ func TestStatusShowsHowLongItIsBuilding(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+const sampleLog = `2026-01-01 INFO  starting up
+2026-01-01 INFO  listening on 8080
+2026-01-01 ERROR request failed
+java.lang.IllegalStateException: boom
+	at demo.A.run(A.java:1)
+	at demo.B.run(B.java:2)
+2026-01-01 INFO  retrying
+2026-01-01 WARN  slow response
+2026-01-01 INFO  done
+`
+
+// logGrid serves a fixed log and remembers the last query of the logs endpoint.
+func logGrid(t *testing.T, lastQuery *string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/state":
+			json.NewEncoder(w).Encode(map[string]any{"services": []map[string]any{{
+				"name": "api", "status": "running", "type": "spring-boot", "group": "backend", "cwd": "/work/api",
+				"command": "java -jar target/api.jar", "build": "mvn package", "url": "http://localhost:8081",
+				"ready": "port 8081", "dependsOn": []string{"db"}, "pid": 42}}})
+		case strings.HasPrefix(r.URL.Path, "/api/do/"):
+			w.Write([]byte(`{"ok":true}`))
+		case strings.HasSuffix(r.URL.Path, "/logs"):
+			*lastQuery = r.URL.RawQuery
+			w.Write([]byte(sampleLog))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func callTool(t *testing.T, s *Server, name, args string) string {
+	res := run(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"`+name+`","arguments":`+args+`}}`)
+	return text(res[0])
+}
+
+func TestLogsLevelErrorWithContext(t *testing.T) {
+	var q string
+	g := logGrid(t, &q)
+	defer g.Close()
+	s := New(0, "test")
+	s.Base = g.URL
+	got := callTool(t, s, "logs", `{"service":"api","level":"error","context":3}`)
+	for _, want := range []string{"2 matching lines", "request failed", "IllegalStateException", "A.java:1", "B.java:2"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("answer lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "listening on") || strings.Contains(got, "slow response") {
+		t.Errorf("unrelated lines leaked in:\n%s", got)
+	}
+	// level=warn adds the warning
+	if got := callTool(t, s, "logs", `{"service":"api","level":"warn"}`); !strings.Contains(got, "slow response") {
+		t.Errorf("warn level should include warnings:\n%s", got)
+	}
+}
+
+func TestLogsGrepAndErrors(t *testing.T) {
+	var q string
+	g := logGrid(t, &q)
+	defer g.Close()
+	s := New(0, "test")
+	s.Base = g.URL
+	if got := callTool(t, s, "logs", `{"service":"api","grep":"LISTENING on \\d+"}`); !strings.Contains(got, "1 matching lines") || !strings.Contains(got, "listening on 8080") {
+		t.Errorf("case-insensitive grep failed:\n%s", got)
+	}
+	if got := callTool(t, s, "logs", `{"service":"api","grep":"nothing like this"}`); !strings.HasPrefix(got, "No matching lines") {
+		t.Errorf("got %q", got)
+	}
+	res := run(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"logs","arguments":{"service":"api","grep":"("}}}`)
+	if res[0]["result"].(map[string]any)["isError"] != true || !strings.Contains(text(res[0]), "regular expression") {
+		t.Errorf("a bad regex must be a clear tool error: %v", res[0])
+	}
+	res = run(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"logs","arguments":{"service":"api","level":"loud"}}}`)
+	if res[0]["result"].(map[string]any)["isError"] != true {
+		t.Error("unknown level must be an error")
+	}
+}
+
+func TestLogsSinceRestartAsksTheGrid(t *testing.T) {
+	var q string
+	g := logGrid(t, &q)
+	defer g.Close()
+	s := New(0, "test")
+	s.Base = g.URL
+	callTool(t, s, "logs", `{"service":"api","since_restart":true}`)
+	if !strings.Contains(q, "since=start") {
+		t.Fatalf("query %q", q)
+	}
+	callTool(t, s, "logs", `{"service":"api"}`)
+	if strings.Contains(q, "since=") {
+		t.Fatalf("plain logs must not ask for since: %q", q)
+	}
+	// restart / wait report only what the latest start produced
+	callTool(t, slowRestart(g), "restart", `{"service":"api"}`)
+	if !strings.Contains(q, "since=start") {
+		t.Fatalf("restart must show the log since the start: %q", q)
+	}
+}
+
+func slowRestart(g *httptest.Server) *Server {
+	s := New(0, "test")
+	s.Base, s.Poll, s.Grace = g.URL, time.Millisecond, time.Millisecond
+	s.DefaultWait = 50 * time.Millisecond
+	return s
+}
+
+func TestDescribe(t *testing.T) {
+	var q string
+	g := logGrid(t, &q)
+	defer g.Close()
+	s := New(0, "test")
+	s.Base = g.URL
+	got := callTool(t, s, "describe", `{"service":"api"}`)
+	for _, want := range []string{"api: running", "folder: /work/api", "build: mvn package", "run: java -jar target/api.jar",
+		"url: http://localhost:8081", "ready when: port 8081", "depends on: db", "group: backend"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("describe lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestFilterLinesSeparatorsOnlyWithContext(t *testing.T) {
+	lines := []string{"a err", "b", "c", "d err", "e"}
+	isErr := func(l string) bool { return strings.Contains(l, "err") }
+	if out, n := filterLines(lines, isErr, 0, 10); n != 2 || strings.Join(out, "|") != "a err|d err" {
+		t.Fatalf("no context: %v %d", out, n)
+	}
+	if out, _ := filterLines(lines, isErr, 1, 10); strings.Join(out, "|") != "a err|b|--|d err|e" {
+		t.Fatalf("context 1: %v", out)
+	}
+	if out, _ := filterLines(lines, isErr, 1, 2); out[0] == "--" {
+		t.Fatalf("must not start with a separator: %v", out)
+	}
+}
