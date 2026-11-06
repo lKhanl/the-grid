@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { act, closeTerm, deleteService, openTerm, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State, type TermInfo } from './api'
+import { act, closeTerm, setLogLines, deleteService, openTerm, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State, type TermInfo } from './api'
 import { LogView } from './LogView'
 import { ChangesIcon, ChevronIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, JarIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon, TerminalIcon } from './icons'
 import { ServiceForm } from './ServiceForm'
@@ -37,6 +37,13 @@ const SHORTCUTS: [string, [string[], string][]][] = [
   ],
 ]
 const BUILDS = new Set(['spring-boot', 'node'])
+
+const LOG_BYTES_PER_LINE = 2000 // measured (server RSS + browser heap) with ~300-byte Spring-style lines
+
+function logMemoryMB(lines: number, services: number) {
+  const mb = (lines * services * LOG_BYTES_PER_LINE) / 1048576
+  return mb < 10 ? mb.toFixed(1) : Math.round(mb)
+}
 
 function uptime(ms?: number) {
   if (!ms) return ''
@@ -95,6 +102,10 @@ export default function App() {
   const [state, setState] = useState<State | null>(null)
   const [selected, setSelected] = useState<string | null>(() => localStorage.getItem('grid.selected'))
   const [filter, setFilter] = useState('')
+  const logLines = state?.logLines ?? 5000
+  store.setMax(logLines) // cheap no-op unless the setting changed
+  const nameKey = state?.services.map((s) => s.name).join('\n') ?? ''
+  const serviceNames = useMemo(() => (nameKey ? nameKey.split('\n') : []), [nameKey])
   const [connected, setConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [unread, setUnread] = useState<Record<string, 'out' | 'err'>>({})
@@ -643,6 +654,30 @@ export default function App() {
                   </div>
                 </section>
                 <section>
+                  <h4>Logs</h4>
+                  <div className="setting-text">
+                    <span>History per service</span>
+                    <small>Lines kept in memory. Fewer lines switch faster and use less memory.</small>
+                  </div>
+                  <div className="seg" role="radiogroup" aria-label="Log lines per service">
+                    {(state?.logLineOptions ?? [1000, 2500, 5000, 10000]).map((n) => (
+                      <button
+                        key={n}
+                        role="radio"
+                        aria-checked={logLines === n}
+                        className={logLines === n ? 'on' : ''}
+                        onClick={() => setLogLines(n).then(setState, (e) => setError(String(e.message ?? e)))}
+                      >
+                        {n.toLocaleString('en-US')}
+                      </button>
+                    ))}
+                  </div>
+                  <small className="seg-note">
+                    About {logMemoryMB(logLines, state?.services.length ?? 0)} MB for {state?.services.length ?? 0} services. Lowering it drops the oldest lines now.
+                    Saved in ~/.grid.
+                  </small>
+                </section>
+                <section>
                   <h4>Keyboard shortcuts</h4>
                   {SHORTCUTS.map(([title, list]) => (
                     <div key={title} className="shortcut-group">
@@ -661,7 +696,6 @@ export default function App() {
                   ))}
                 </section>
                 <div className="settings-foot">
-                  Saved in this browser.
                   {state?.version && <span className="settings-version">The Grid {state.version}</span>}
                 </div>
               </div>
@@ -777,7 +811,7 @@ export default function App() {
               {current.ready ? <span className="muted"> · ready on {current.ready}</span> : null}
             </div>
           )}
-          <LogView service={selected} store={store} filter={filter} theme={theme} />
+          <LogView service={selected} store={store} filter={filter} theme={theme} maxLines={logLines} known={serviceNames} />
           </div>
           {(termOpen || terms.length > 0) && (
             <TermPanel

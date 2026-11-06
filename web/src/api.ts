@@ -35,6 +35,9 @@ export interface State {
   version: string
   name: string
   configPath: string
+  /** log history kept per service, and the sizes the UI offers */
+  logLines: number
+  logLineOptions: number[]
   runtimes: RuntimeInfo[]
   services: Info[]
 }
@@ -83,19 +86,36 @@ export async function reload() {
   await check(await fetch('/api/reload', { method: 'POST', headers: HEADERS }))
 }
 
-export async function fetchLogs(service: string, tail = 10000): Promise<Entry[]> {
+export async function setLogLines(n: number): Promise<State> {
+  const r = await check(
+    await fetch('/api/settings', { method: 'PUT', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: JSON.stringify({ logLines: n }) }),
+  )
+  return r.json()
+}
+
+export async function fetchLogs(service: string, tail = 5000): Promise<Entry[]> {
   const r = await check(await fetch(`/api/services/${encodeURIComponent(service)}/logs?format=json&tail=${tail}`))
   return r.json()
 }
 
-const MAX_LINES = 10000
+const DEFAULT_MAX_LINES = 5000
 
 type Listener = (service: string, entries: Entry[], reset: boolean) => void
 
 /** Keeps the log lines of every service in memory, outside React state. */
 export class LogStore {
   private buffers = new Map<string, Entry[]>()
+  private max = DEFAULT_MAX_LINES
   private listeners = new Set<Listener>()
+
+  /** Lines kept per service; a lower limit drops the oldest ones now. */
+  setMax(n: number) {
+    if (n === this.max) return
+    this.max = n
+    this.buffers.forEach((buf, k) => {
+      if (buf.length > n) this.buffers.set(k, buf.slice(-n))
+    })
+  }
 
   get(service: string): Entry[] {
     return this.buffers.get(service) ?? []
@@ -117,13 +137,13 @@ export class LogStore {
     if (!buf) this.buffers.set(service, (buf = []))
     if (buf.length && buf[buf.length - 1].seq >= e.seq) return
     buf.push(e)
-    if (buf.length > MAX_LINES * 1.25) buf.splice(0, buf.length - MAX_LINES)
+    if (buf.length > this.max * 1.25) buf.splice(0, buf.length - this.max)
     this.emit(service, [e], false)
   }
 
   /** Set the whole buffer (log history from a fresh connection). */
   set(service: string, entries: Entry[]) {
-    this.buffers.set(service, entries.slice(-MAX_LINES))
+    this.buffers.set(service, entries.slice(-this.max))
     this.emit(service, this.get(service), true)
   }
 

@@ -24,6 +24,7 @@ type Workspace struct {
 type data struct {
 	Workspaces []Workspace `json:"workspaces"`
 	Last       string      `json:"last,omitempty"`
+	LogLines   int         `json:"logLines,omitempty"` // log history per service; 0 = default
 }
 
 // Store reads and writes ~/.grid/state.json. Safe for concurrent use.
@@ -78,6 +79,22 @@ func (s *Store) save(d data) error {
 		return err
 	}
 	return os.Rename(tmp, s.file)
+}
+
+// LogLines is the saved log history size, or 0 if none was chosen.
+func (s *Store) LogLines() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.load().LogLines
+}
+
+// SetLogLines saves the log history size.
+func (s *Store) SetLogLines(n int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := s.load()
+	d.LogLines = n
+	return s.save(d)
 }
 
 // Touch records path as just opened (most recent, and the "last" workspace).

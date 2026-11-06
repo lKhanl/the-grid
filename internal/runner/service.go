@@ -69,7 +69,7 @@ type Service struct {
 }
 
 func newService(m *Manager, cfg config.Service) *Service {
-	s := &Service{name: cfg.Name, mgr: m, status: Stopped, logs: NewLogBuffer(10000)}
+	s := &Service{name: cfg.Name, mgr: m, status: Stopped, logs: NewLogBuffer(m.LogLines())}
 	s.setConfig(cfg)
 	return s
 }

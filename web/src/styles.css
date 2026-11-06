@@ -116,7 +116,8 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .filter:focus { border-color: var(--accent); }
 .subbar { padding: 6px 14px; font-size: 14px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .subbar code { font-family: 'JetBrains Mono', Consolas, Menlo, monospace; color: #c9a26d; }
-.log-host { flex: 1; min-height: 0; padding: 4px 0 0 8px; background: var(--bg); }
+.log-host { flex: 1; min-height: 0; position: relative; background: var(--bg); }
+.log-pane { position: absolute; top: 4px; left: 8px; right: 0; bottom: 0; }
 .log-host .xterm { height: 100%; }
 .log-host .xterm-viewport { background: var(--bg) !important; }
 .subbar { display: flex; align-items: center; gap: 6px; }
@@ -408,6 +409,14 @@ details.form-section[open] summary { margin-bottom: 10px; }
 .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
 .switch.on { background: var(--accent); border-color: var(--accent); }
 .switch.on::after { transform: translateX(14px); background: #fff; }
+.setting-text { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.setting-text small, .seg-note { color: var(--muted); font-size: 12px; }
+.seg-note { display: block; margin-top: 8px; line-height: 1.4; }
+.seg { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { flex: 1; padding: 7px 0; border: 0; border-right: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button:hover { background: var(--on); }
+.seg button.on { background: var(--accent); color: #fff; font-weight: 600; }
 .settings-foot { color: var(--muted); font-size: 12px; }
 
 /* ---- terminal panel (bottom, VS Code style) ---- */

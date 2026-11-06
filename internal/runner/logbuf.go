@@ -37,11 +37,24 @@ func (b *LogBuffer) Add(stream, line string) Entry {
 	return e
 }
 
+// SetMax changes the limit; a lower one drops the oldest lines right away.
+func (b *LogBuffer) SetMax(n int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.max = n
+	if len(b.entries) > n {
+		b.entries = append([]Entry(nil), b.entries[len(b.entries)-n:]...)
+	}
+}
+
 func (b *LogBuffer) Tail(n int) []Entry {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if n <= 0 || n > len(b.entries) {
 		n = len(b.entries)
+	}
+	if n > b.max { // the slack above max only exists to avoid copying on every line
+		n = b.max
 	}
 	return append([]Entry(nil), b.entries[len(b.entries)-n:]...)
 }

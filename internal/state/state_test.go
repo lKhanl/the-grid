@@ -47,3 +47,18 @@ func TestCorruptFile(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLogLinesPersist(t *testing.T) {
+	dir := t.TempDir()
+	s := OpenAt(dir)
+	if s.LogLines() != 0 {
+		t.Fatal("unset must read as 0")
+	}
+	if err := s.SetLogLines(2500); err != nil {
+		t.Fatal(err)
+	}
+	s.Touch(filepath.Join(dir, "a.yaml"), "A") // other writes must not lose it
+	if got := OpenAt(dir).LogLines(); got != 2500 {
+		t.Fatalf("log lines = %d", got)
+	}
+}

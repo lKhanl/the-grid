@@ -3,6 +3,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
@@ -34,6 +35,26 @@ func New(m *runner.Manager, terms *term.Manager, store *state.Store, ui fs.FS) h
 	gitRoutes(mux, m)
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, m.State())
+	})
+	// User settings kept in ~/.grid (apply to every workspace).
+	mux.HandleFunc("PUT /api/settings", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			LogLines int `json:"logLines"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !runner.ValidLogLines(body.LogLines) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("logLines must be one of %v", runner.LogLineOptions))
+			return
+		}
+		m.SetLogLines(body.LogLines)
+		if store != nil {
+			if err := store.SetLogLines(body.LogLines); err != nil {
+				writeError(w, http.StatusInternalServerError, "not saved: "+err.Error())
+				return
+			}
+		}
+		st := m.State()
+		m.Hub.Publish(runner.Event{Type: "snapshot", State: &st}) // other open tabs follow
+		writeJSON(w, http.StatusOK, st)
 	})
 	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) { events(m, terms, w, r) })
 	mux.HandleFunc("GET /api/services/{name}/logs", func(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +286,7 @@ func events(m *runner.Manager, terms *term.Manager, w http.ResponseWriter, r *ht
 	st := m.State()
 	logs := map[string][]runner.Entry{}
 	for _, s := range m.Services() {
-		logs[s.Name()] = s.Logs(10000)
+		logs[s.Name()] = s.Logs(m.LogLines())
 	}
 	writeEvent(w, runner.Event{Type: "snapshot", State: &st, Logs: logs, Terms: terms.List()})
 	fl.Flush()

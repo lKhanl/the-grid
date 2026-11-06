@@ -28,7 +28,7 @@ need 3–4 APIs, UIs and scripts running side by side with their logs one click 
 - Add / edit / delete services and runtimes from the UI (writes `grid.yaml`, keeps comments)
 - Several JDKs / Node versions side by side (`runtimes`), one per service
 - **Changes** view: read-only git diff per service (files as a tree, side-by-side or unified) to review what an AI agent wrote
-- Live colored logs (xterm.js), filter, 10k lines per service
+- Live colored logs (xterm.js), filter, 1k-10k lines per service (Settings → Logs, default 5k)
 - `depends_on` + readiness (`port` or log regex) so things start in order
 - Restart policies (`on-failure`, `always`)
 - Clean process-tree kill: Windows Job Objects / Unix process groups — no orphan

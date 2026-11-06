@@ -135,6 +135,11 @@ func serve(args []string) error {
 	}
 	runner.Version = version
 	m := runner.NewManager(cfg)
+	if store != nil {
+		if n := store.LogLines(); runner.ValidLogLines(n) {
+			m.SetLogLines(n)
+		}
+	}
 
 	ui, err := fs.Sub(web.Dist, "dist")
 	if err != nil {

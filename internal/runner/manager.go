@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/lKhanl/the-grid/internal/config"
 )
@@ -17,10 +18,28 @@ import (
 var Version = "dev"
 
 // State is a snapshot of everything the UI needs.
+// LogLineOptions are the log history sizes the user can pick (lines per service).
+var LogLineOptions = []int{1000, 2500, 5000, 10000}
+
+// DefaultLogLines is used until the user picks another size.
+const DefaultLogLines = 5000
+
+// ValidLogLines reports whether n is one of LogLineOptions.
+func ValidLogLines(n int) bool {
+	for _, o := range LogLineOptions {
+		if o == n {
+			return true
+		}
+	}
+	return false
+}
+
 type State struct {
 	Version    string        `json:"version"`
 	Name       string        `json:"name"`
 	ConfigPath string        `json:"configPath"`
+	LogLines   int           `json:"logLines"`       // history kept per service
+	LogOptions []int         `json:"logLineOptions"` // sizes the UI offers
 	Runtimes   []RuntimeInfo `json:"runtimes"`
 	Services   []Info        `json:"services"`
 }
@@ -62,6 +81,8 @@ func (m *Manager) runtime(name string) *config.Runtime {
 type Manager struct {
 	Hub *Hub
 
+	logLines atomic.Int64 // read inside m.mu by newService, so not guarded by it
+
 	mu       sync.RWMutex
 	cfg      *config.Config
 	services []*Service
@@ -70,12 +91,24 @@ type Manager struct {
 
 func NewManager(cfg *config.Config) *Manager {
 	m := &Manager{Hub: NewHub(), cfg: cfg, byName: map[string]*Service{}}
+	m.logLines.Store(DefaultLogLines)
 	for _, sc := range cfg.Services {
 		s := newService(m, sc)
 		m.services = append(m.services, s)
 		m.byName[s.name] = s
 	}
 	return m
+}
+
+// LogLines is how many log lines each service keeps.
+func (m *Manager) LogLines() int { return int(m.logLines.Load()) }
+
+// SetLogLines changes the history size of every service, now and for new ones.
+func (m *Manager) SetLogLines(n int) {
+	m.logLines.Store(int64(n))
+	for _, s := range m.Services() {
+		s.logs.SetMax(n)
+	}
 }
 
 func (m *Manager) Services() []*Service {
@@ -94,7 +127,7 @@ func (m *Manager) State() State {
 	m.mu.RLock()
 	cfg := m.cfg
 	m.mu.RUnlock()
-	st := State{Version: Version, Name: cfg.Name, ConfigPath: cfg.Path, Services: []Info{}, Runtimes: []RuntimeInfo{}}
+	st := State{Version: Version, Name: cfg.Name, ConfigPath: cfg.Path, LogLines: m.LogLines(), LogOptions: LogLineOptions, Services: []Info{}, Runtimes: []RuntimeInfo{}}
 	for _, name := range cfg.RuntimeOrder {
 		rt := cfg.Runtimes[name]
 		ri := RuntimeInfo{Name: name, Type: rt.Type, Home: rt.Home}
