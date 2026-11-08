@@ -123,6 +123,11 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .link:hover { text-decoration: underline; }
 .filter-wrap { position: relative; display: flex; align-items: center; color: var(--muted); }
 .filter-wrap .icon { position: absolute; left: 10px; pointer-events: none; }
+/* A narrow window: the buttons keep their size, the filter and then the URL give way. */
+.toolbar > .btn, .toolbar > .title, .toolbar > .badge, .toolbar > .status-icon { flex: none; }
+.toolbar > .link { min-width: 48px; overflow: hidden; }
+.toolbar > .filter-wrap { flex: 0 1 260px; min-width: 120px; }
+.toolbar > .filter-wrap .filter { width: 100%; }
 .filter { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 5px; height: 34px; width: 260px; padding: 0 10px 0 32px; font: inherit; font-size: 14px; outline: none; }
 .filter:focus { border-color: var(--accent); }
 .subbar { padding: 6px 14px; font-size: 14px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
