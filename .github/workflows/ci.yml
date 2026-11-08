@@ -1,0 +1,64 @@
+# Checks every push and pull request, so a broken build is caught before
+# `make release` (release.yml runs the tests again on the tag).
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          bad=$(gofmt -l $(git ls-files '*.go' | grep -v '^vendor/'))
+          if [ -n "$bad" ]; then echo "not gofmt'ed (run gofmt -w):"; echo "$bad"; exit 1; fi
+
+      - name: Vet (every build)
+        run: |
+          go vet ./...
+          go vet -tags db ./...
+          go vet -tags oracle ./...
+          go vet -tags postgres ./...
+
+      - name: Test (every build)
+        run: make test
+
+      - name: Cross-compile Windows
+        run: GOOS=windows GOARCH=amd64 go build -tags db -o /dev/null .
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Type-check and build
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # web/dist is committed so Go-only builds need no npm; it must match the sources
+      - name: web/dist is up to date
+        run: |
+          if ! git diff --quiet -- web/dist || [ -n "$(git ls-files --others --exclude-standard web/dist)" ]; then
+            git status --short web/dist
+            echo "web/dist is stale: run 'make web' and commit it"; exit 1
+          fi

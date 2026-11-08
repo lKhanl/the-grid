@@ -135,7 +135,9 @@ func (p *winPTY) Read(b []byte) (int, error)  { return p.out.Read(b) }
 func (p *winPTY) Write(b []byte) (int, error) { return p.in.Write(b) }
 func (p *winPTY) Pid() int                    { return p.pid }
 
-func (p *winPTY) Resize(cols, rows int) error { return windows.ResizePseudoConsole(p.hpc, coord(cols, rows)) }
+func (p *winPTY) Resize(cols, rows int) error {
+	return windows.ResizePseudoConsole(p.hpc, coord(cols, rows))
+}
 
 func (p *winPTY) Wait() int {
 	windows.WaitForSingleObject(p.process, windows.INFINITE)

@@ -21,10 +21,10 @@ type ptyProc interface {
 	Write([]byte) (int, error)
 	Resize(cols, rows int) error
 	Pid() int
-	Wait() int  // blocks until the shell exits; returns its exit code
-	Kill()      // ends the shell and everything it started
-	Hangup()    // after exit: makes pending reads finish
-	Close()     // releases everything
+	Wait() int // blocks until the shell exits; returns its exit code
+	Kill()     // ends the shell and everything it started
+	Hangup()   // after exit: makes pending reads finish
+	Close()    // releases everything
 }
 
 const scrollback = 1 << 20 // bytes of output kept for reattaching clients
@@ -91,7 +91,9 @@ func (m *Manager) List() []Info {
 	for _, s := range list {
 		out = append(out, s.Info())
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Started < out[j].Started || (out[i].Started == out[j].Started && out[i].ID < out[j].ID) })
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Started < out[j].Started || (out[i].Started == out[j].Started && out[i].ID < out[j].ID)
+	})
 	return out
 }
 

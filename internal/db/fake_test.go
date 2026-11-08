@@ -130,4 +130,3 @@ func newTestManager(t *testing.T, c Conn) (*Manager, *fake) {
 	t.Cleanup(m.Close)
 	return m, f
 }
-
