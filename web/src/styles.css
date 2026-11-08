@@ -433,6 +433,7 @@ details.form-section[open] summary { margin-bottom: 10px; }
 .setting-text { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
 .setting-text small, .seg-note { color: var(--muted); font-size: 12px; }
 .seg-note { display: block; margin-top: 8px; line-height: 1.4; }
+.seg-note code.path { font-family: 'JetBrains Mono', Consolas, Menlo, monospace; word-break: break-all; cursor: copy; }
 .seg { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .seg button { flex: 1; padding: 7px 0; border: 0; border-right: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
 .seg button:last-child { border-right: 0; }

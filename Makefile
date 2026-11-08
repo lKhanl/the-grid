@@ -6,7 +6,7 @@ LDFLAGS := -s -w
 #   make build DB=postgres   PostgreSQL only
 TAGS := $(if $(filter 1 yes true,$(DB)),-tags db,$(if $(DB),-tags $(DB),))
 
-.PHONY: web build windows run dev vendor test
+.PHONY: web build windows linux run dev vendor test
 
 web:            ## build the UI into web/dist (committed, so Go-only builds work)
 	cd web && npm install && npm run build
@@ -19,6 +19,9 @@ windows:        ## Windows exe for the VDI
 
 vendor:         ## vendor Go deps so the VDI can build offline
 	go mod tidy && go mod vendor
+
+linux:          ## Linux x86-64 binary
+	GOOS=linux GOARCH=amd64 go build $(TAGS) -ldflags "$(LDFLAGS)" -o bin/grid-linux .
 
 run: build
 	./bin/grid -c grid.yaml

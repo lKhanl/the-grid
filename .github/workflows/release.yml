@@ -1,7 +1,7 @@
 # Cut a release: `make release` tags vX.Y.Z (X.Y.Z = the VERSION file) and pushes the tag.
-# This builds grid.exe (Windows) and grid-macos (Apple silicon), plus grid-db.exe and
-# grid-db-macos with the Database panel and both drivers (-tags db), and attaches them with
-# their SHA-256 sums. Nothing is downloaded by the app itself: update by hand.
+# This builds grid.exe (Windows), grid-macos (Apple silicon) and grid-linux (x86-64), plus
+# grid-db.exe, grid-db-macos and grid-db-linux with the Database panel and both drivers
+# (-tags db), and attaches them with their SHA-256 sums. Nothing is downloaded by the app itself: update by hand.
 name: release
 
 on:
@@ -36,13 +36,15 @@ jobs:
           mkdir dist
           GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o dist/grid.exe .
           GOOS=darwin  GOARCH=arm64 go build -ldflags "-s -w" -o dist/grid-macos .
+          GOOS=linux   GOARCH=amd64 go build -ldflags "-s -w" -o dist/grid-linux .
           GOOS=windows GOARCH=amd64 go build -tags db -ldflags "-s -w" -o dist/grid-db.exe .
           GOOS=darwin  GOARCH=arm64 go build -tags db -ldflags "-s -w" -o dist/grid-db-macos .
-          cd dist && sha256sum grid.exe grid-macos grid-db.exe grid-db-macos > SHA256SUMS.txt && cat SHA256SUMS.txt
+          GOOS=linux   GOARCH=amd64 go build -tags db -ldflags "-s -w" -o dist/grid-db-linux .
+          cd dist && sha256sum grid.exe grid-macos grid-linux grid-db.exe grid-db-macos grid-db-linux > SHA256SUMS.txt && cat SHA256SUMS.txt
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/grid.exe dist/grid-macos dist/grid-db.exe dist/grid-db-macos dist/SHA256SUMS.txt \
+          gh release create "$GITHUB_REF_NAME" dist/grid.exe dist/grid-macos dist/grid-linux dist/grid-db.exe dist/grid-db-macos dist/grid-db-linux dist/SHA256SUMS.txt \
             --title "The Grid $GITHUB_REF_NAME" --generate-notes

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -66,6 +67,7 @@ type jobExtendedLimit struct {
 
 type proc struct {
 	pid int
+	mu  sync.Mutex // guards job against release() while stats read it
 	job syscall.Handle
 }
 
@@ -175,14 +177,19 @@ func startProc(c *exec.Cmd) (*proc, error) {
 func (p *proc) terminate() { p.kill() }
 
 func (p *proc) kill() {
-	if p.job != 0 {
-		procTerminateJobObject.Call(uintptr(p.job), 1)
+	p.mu.Lock()
+	job := p.job
+	p.mu.Unlock()
+	if job != 0 {
+		procTerminateJobObject.Call(uintptr(job), 1)
 		return
 	}
 	exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(p.pid)).Run()
 }
 
 func (p *proc) release() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.job != 0 {
 		syscall.CloseHandle(p.job) // kills leftovers thanks to KILL_ON_JOB_CLOSE
 		p.job = 0

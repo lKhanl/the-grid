@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -45,7 +46,10 @@ type State struct {
 	LogOptions []int         `json:"logLineOptions"` // sizes the UI offers
 	Runtimes   []RuntimeInfo `json:"runtimes"`
 	Services   []Info        `json:"services"`
-	Features   []string      `json:"features"` // optional modules in this build, e.g. "db"
+	Features   []string      `json:"features"`         // optional modules in this build, e.g. "db"
+	LogDir     string        `json:"logDir,omitempty"` // log files of this workspace ("" = off)
+	LogFiles   bool          `json:"logFiles"`         // writing logs to files is on
+	LogFileMax int64         `json:"logFileMax"`       // disk space per service, bytes
 }
 
 type RuntimeInfo struct {
@@ -86,6 +90,8 @@ type Manager struct {
 	Hub *Hub
 
 	logLines atomic.Int64 // read inside m.mu by newService, so not guarded by it
+	files    *fileLogs
+	statsOn  sync.Once
 
 	mu       sync.RWMutex
 	cfg      *config.Config
@@ -94,10 +100,10 @@ type Manager struct {
 }
 
 func NewManager(cfg *config.Config) *Manager {
-	m := &Manager{Hub: NewHub(), cfg: cfg, byName: map[string]*Service{}}
+	m := &Manager{Hub: NewHub(), cfg: cfg, byName: map[string]*Service{}, files: newFileLogs()}
 	m.logLines.Store(DefaultLogLines)
 	for _, sc := range cfg.Services {
-		s := newService(m, sc)
+		s := newService(m, sc, cfg.Path)
 		m.services = append(m.services, s)
 		m.byName[s.name] = s
 	}
@@ -131,7 +137,10 @@ func (m *Manager) State() State {
 	m.mu.RLock()
 	cfg := m.cfg
 	m.mu.RUnlock()
-	st := State{Version: Version, Name: cfg.Name, ConfigPath: cfg.Path, LogLines: m.LogLines(), LogOptions: LogLineOptions, Services: []Info{}, Runtimes: []RuntimeInfo{}, Features: append([]string{}, Features...)}
+	st := State{Version: Version, Name: cfg.Name, ConfigPath: cfg.Path, LogLines: m.LogLines(), LogOptions: LogLineOptions, Services: []Info{}, Runtimes: []RuntimeInfo{}, Features: append([]string{}, Features...), LogFileMax: MaxLogFileBytes, LogFiles: m.files.enabled()}
+	if root := m.files.rootDir(); root != "" && cfg.Path != "" {
+		st.LogDir = filepath.Join(root, workspaceKey(cfg.Path))
+	}
 	for _, name := range cfg.RuntimeOrder {
 		rt := cfg.Runtimes[name]
 		ri := RuntimeInfo{Name: name, Type: rt.Type, Home: rt.Home}
@@ -225,7 +234,19 @@ func (m *Manager) Autostart() {
 	}
 }
 
-func (m *Manager) Shutdown() { stopAll(m.Services()) }
+// Shutdown stops every service, then flushes the log files.
+func (m *Manager) Shutdown() {
+	stopAll(m.Services())
+	m.files.close()
+}
+
+// SetLogDir writes every service's log to files under dir too ("" = off).
+func (m *Manager) SetLogDir(dir string) {
+	m.files.setRoot(dir)
+}
+
+// SetLogFiles turns writing logs to files on or off (Settings → Logs).
+func (m *Manager) SetLogFiles(on bool) { m.files.setEnabled(on) }
 
 // Reload re-reads the config file. Running services keep running with the
 // old settings; the new settings apply on their next start. Services that
@@ -251,7 +272,7 @@ func (m *Manager) Reload() error {
 			s.setConfig(sc)
 			delete(old, sc.Name)
 		} else {
-			s = newService(m, sc)
+			s = newService(m, sc, cfg.Path)
 		}
 		m.services = append(m.services, s)
 		m.byName[sc.Name] = s
@@ -279,7 +300,7 @@ func (m *Manager) Switch(path string) error {
 	old := m.services
 	m.services, m.byName = nil, map[string]*Service{}
 	for _, sc := range cfg.Services {
-		s := newService(m, sc)
+		s := newService(m, sc, cfg.Path)
 		m.services = append(m.services, s)
 		m.byName[sc.Name] = s
 	}

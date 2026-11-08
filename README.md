@@ -33,6 +33,8 @@ need 3–4 APIs, UIs and scripts running side by side with their logs one click 
 - Several JDKs / Node versions side by side (`runtimes`), one per service
 - **Changes** view: read-only git diff per service (files as a tree, side-by-side or unified, syntax coloured) to review what an AI agent wrote
 - Live colored logs (xterm.js), filter, 1k-10k lines per service (Settings → Logs, default 5k)
+- Logs also go to files (`~/.grid/logs`, can be turned off), at most 10 MB per service, so they survive a restart of the Grid
+- CPU and memory of each running service (its whole process tree), in the toolbar and over MCP
 - **Terminals** in the same window (``Ctrl+` ``): real shells (cmd, PowerShell, Git Bash, bash, zsh…) opened in the
   selected service's folder, several at once (Windows 10 1809+ for the pseudo-console)
 - **Database** panel (optional module, `-tags db`): a small Oracle SQL client you can share with your AI agent over MCP (see below)
@@ -67,8 +69,8 @@ machines where endpoint protection flags new executables. `go version -m grid` l
 Grid remembers the workspaces you open in `~/.grid/state.json` (override with `$GRID_HOME`).
 Without `-c` it reopens the last one; switch workspaces from the name next to the logo.
 
-Prebuilt binaries (`grid.exe` for Windows x64, `grid-macos` for Apple silicon, `grid-db.exe` / `grid-db-macos` with the
-Database panel, and `SHA256SUMS.txt`) are on the
+Prebuilt binaries (`grid.exe` for Windows x64, `grid-macos` for Apple silicon, `grid-linux` for Linux x86-64,
+`grid-db.exe` / `grid-db-macos` / `grid-db-linux` with the Database panel, and `SHA256SUMS.txt`) are on the
 [Releases](../../releases) page. The UI is prebuilt in `web/dist` and Go deps are vendored, so building only needs
 Go — no npm or internet access.
 
@@ -111,9 +113,9 @@ edit → restart → read logs loop without you copy-pasting:
 
 | tool | what it does |
 |---|---|
-| `status` | services and their state |
+| `status` | services and their state (with CPU and memory while running) |
 | `logs` | last N log lines of a service (colors removed). Filters save tokens: `level` (error / warn), `grep` (regex), `since_restart`, `context` (lines after each match, for stack traces) |
-| `describe` | one service in full: folder, build and run command, URL, readiness, dependencies, runtimes |
+| `describe` | one service in full: folder, build and run command, URL, readiness, dependencies, runtimes, CPU / memory, log file |
 | `restart` | restart / start / stop, waits until it is running or failed, returns the last log lines |
 | `wait` | keep waiting for a service that `restart` reported as still building / starting |
 
@@ -181,6 +183,21 @@ Read-only is enforced by the Grid, not by trusting the agent: the statement must
 without `FOR UPDATE`, it runs inside `SET TRANSACTION READ ONLY` and is always rolled back, and anything else is
 refused before it reaches the database. A separate read-only database user is still the strongest protection.
 Everything the AI reads goes to your model provider; there is no masking, so share only what you may.
+
+## Log files
+
+Besides the history in memory, every line a service logs is appended (colours removed, with time and stream) to
+`~/.grid/logs/<workspace>-<hash>/<service>.log` (`$GRID_HOME/logs` when that is set). It is on by default;
+turn it off with **Save logs to files** in Settings → Logs (saved in `~/.grid`). The folder is shown there, and
+`describe` over MCP gives the file of a service. Each service takes at most **10 MB**: when
+`<service>.log` reaches 5 MB it becomes `<service>.log.1` (replacing the older one) and a new file starts. Clearing
+the log in the UI does not touch the files. Idle files are closed after 30 s, so they can be opened or deleted at any time.
+
+## CPU and memory
+
+While a service (or its build) runs, the toolbar shows the CPU (one core = 100%) and resident memory of its
+whole process tree, e.g. `mvn` → `java`, sampled every 2 seconds. On Windows the numbers come from the service's
+Job Object, on Linux from `/proc`, on macOS from `ps`. `status` and `describe` over MCP show them too.
 
 ## Adding and editing services in the UI
 
@@ -279,5 +296,6 @@ make build   # local binary in bin/ (build web/dist first when the UI changed)
 make web     # rebuild web/dist (commit it)
 make vendor  # after changing Go deps (commit vendor/)
 make windows # cross-compile bin/grid.exe
+make linux   # cross-compile bin/grid-linux
 make test     # Go tests of both builds (the Database tests use a fake driver, no Oracle needed)
 ```

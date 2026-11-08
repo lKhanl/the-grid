@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -145,6 +146,13 @@ func serve(args []string) error {
 			m.SetLogLines(n)
 		}
 	}
+	if dir, err := state.Dir(); err == nil {
+		m.SetLogDir(filepath.Join(dir, "logs"))
+	}
+	if store != nil {
+		m.SetLogFiles(store.LogFiles())
+	}
+	m.StartStats()
 
 	ui, err := fs.Sub(web.Dist, "dist")
 	if err != nil {

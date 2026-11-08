@@ -45,6 +45,11 @@ type Info struct {
 	Ready       string   `json:"ready,omitempty"`
 	Runtimes    []string `json:"runtimes,omitempty"`
 	NoChanges   bool     `json:"noChanges,omitempty"` // left out of the Changes view
+	// CPU is the process tree's CPU use in percent of one core, Mem its
+	// resident memory in bytes; both only while a process runs.
+	CPU     *float64 `json:"cpu,omitempty"`
+	Mem     uint64   `json:"mem,omitempty"`
+	LogFile string   `json:"logFile,omitempty"` // where the log is also written
 }
 
 type Service struct {
@@ -68,10 +73,12 @@ type Service struct {
 	readyClosed   bool
 	prevBuild     string // previews of the derived commands
 	prevRun       string
+	wsKey         string // log folder of the workspace (see workspaceKey)
+	stats         procStats
 }
 
-func newService(m *Manager, cfg config.Service) *Service {
-	s := &Service{name: cfg.Name, mgr: m, status: Stopped, logs: NewLogBuffer(m.LogLines())}
+func newService(m *Manager, cfg config.Service, cfgPath string) *Service {
+	s := &Service{name: cfg.Name, mgr: m, status: Stopped, logs: NewLogBuffer(m.LogLines()), wsKey: workspaceKey(cfgPath)}
 	s.setConfig(cfg)
 	return s
 }
@@ -86,6 +93,14 @@ func (s *Service) Info() Info {
 		PID: s.pid, ExitCode: s.exitCode, Restarts: s.restarts,
 		Type: s.cfg.Type, Build: s.prevBuild, Command: s.prevRun, Cwd: s.cfg.Cwd, URL: s.cfg.URL, DependsOn: s.cfg.DependsOn,
 		Runtimes: s.cfg.Runtime, NoChanges: !s.cfg.ShowInChanges(),
+		LogFile: s.mgr.files.path(s.wsKey, s.name),
+	}
+	if s.proc != nil && s.stats.proc == s.proc {
+		info.Mem = s.stats.mem
+		if s.stats.cpuOK {
+			cpu := s.stats.cpu
+			info.CPU = &cpu
+		}
 	}
 	if !s.startedAt.IsZero() && (s.status == Running || s.status == Starting || s.status == Building || s.status == Stopping) {
 		info.StartedAt = s.startedAt.UnixMilli()
@@ -120,6 +135,7 @@ func (s *Service) publish() {
 
 func (s *Service) appendLog(stream, line string) {
 	e := s.logs.Add(stream, line)
+	s.mgr.files.write(s.wsKey, s.name, e)
 	s.mgr.Hub.Publish(Event{Type: "log", Service: s.name, Entry: &e})
 }
 

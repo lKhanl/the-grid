@@ -309,6 +309,35 @@ type info struct {
 	DependsOn   []string `json:"dependsOn"`
 	Ready       string   `json:"ready"`
 	Runtimes    []string `json:"runtimes"`
+	CPU         *float64 `json:"cpu"`
+	Mem         uint64   `json:"mem"`
+	LogFile     string   `json:"logFile"`
+}
+
+// resources is " cpu 12% mem 512 MB" for a running process tree, else "".
+func resources(v info) string {
+	if v.Mem == 0 && v.CPU == nil {
+		return ""
+	}
+	var b strings.Builder
+	if v.CPU != nil {
+		fmt.Fprintf(&b, " cpu %.0f%%", *v.CPU)
+	}
+	if v.Mem > 0 {
+		fmt.Fprintf(&b, " mem %s", humanBytes(v.Mem))
+	}
+	return b.String()
+}
+
+func humanBytes(n uint64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.0f MB", float64(n)/(1<<20))
+	default:
+		return fmt.Sprintf("%.0f KB", float64(n)/(1<<10))
+	}
 }
 
 func (s *Server) get(path string) ([]byte, error) { return s.do("GET", path) }
@@ -380,6 +409,7 @@ func (s *Server) status() (string, error) {
 		if v.URL != "" {
 			fmt.Fprintf(&b, " %s", v.URL)
 		}
+		b.WriteString(resources(v))
 		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
@@ -589,6 +619,8 @@ func (s *Server) describe(service string) (string, error) {
 	if v.Restarts > 0 {
 		line("auto restarts", fmt.Sprint(v.Restarts))
 	}
+	line("resources", strings.TrimSpace(resources(*v)))
+	line("log file", v.LogFile)
 	return b.String(), nil
 }
 

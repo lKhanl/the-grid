@@ -62,3 +62,17 @@ func TestLogLinesPersist(t *testing.T) {
 		t.Fatalf("log lines = %d", got)
 	}
 }
+
+func TestLogFilesDefaultOnAndPersist(t *testing.T) {
+	dir := t.TempDir()
+	s := OpenAt(dir)
+	if !s.LogFiles() {
+		t.Fatal("log files must be on by default")
+	}
+	if err := s.SetLogFiles(false); err != nil {
+		t.Fatal(err)
+	}
+	if OpenAt(dir).LogFiles() {
+		t.Fatal("off not saved")
+	}
+}

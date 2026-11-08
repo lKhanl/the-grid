@@ -43,18 +43,35 @@ func New(m *runner.Manager, terms *term.Manager, store *state.Store, ui fs.FS, m
 	})
 	// User settings kept in ~/.grid (apply to every workspace).
 	mux.HandleFunc("PUT /api/settings", func(w http.ResponseWriter, r *http.Request) {
+		// only the settings present in the body change
 		var body struct {
-			LogLines int `json:"logLines"`
+			LogLines *int  `json:"logLines"`
+			LogFiles *bool `json:"logFiles"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !runner.ValidLogLines(body.LogLines) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.LogLines == nil && body.LogFiles == nil) {
+			writeError(w, http.StatusBadRequest, "expected logLines and/or logFiles")
+			return
+		}
+		if body.LogLines != nil && !runner.ValidLogLines(*body.LogLines) {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("logLines must be one of %v", runner.LogLineOptions))
 			return
 		}
-		m.SetLogLines(body.LogLines)
-		if store != nil {
-			if err := store.SetLogLines(body.LogLines); err != nil {
-				writeError(w, http.StatusInternalServerError, "not saved: "+err.Error())
-				return
+		if n := body.LogLines; n != nil {
+			m.SetLogLines(*n)
+			if store != nil {
+				if err := store.SetLogLines(*n); err != nil {
+					writeError(w, http.StatusInternalServerError, "not saved: "+err.Error())
+					return
+				}
+			}
+		}
+		if on := body.LogFiles; on != nil {
+			m.SetLogFiles(*on)
+			if store != nil {
+				if err := store.SetLogFiles(*on); err != nil {
+					writeError(w, http.StatusInternalServerError, "not saved: "+err.Error())
+					return
+				}
 			}
 		}
 		st := m.State()

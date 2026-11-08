@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { act, closeTerm, setLogLines, deleteService, openTerm, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State, type TermInfo } from './api'
+import { act, closeTerm, setLogLines, saveSettings, deleteService, openTerm, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State, type TermInfo } from './api'
 import { LogView } from './LogView'
 import { ChangesIcon, ChevronIcon, DatabaseIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, JarIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon, TerminalIcon } from './icons'
 import { ServiceForm } from './ServiceForm'
@@ -48,6 +48,12 @@ const LOG_BYTES_PER_LINE = 2000 // measured (server RSS + browser heap) with ~30
 function logMemoryMB(lines: number, services: number) {
   const mb = (lines * services * LOG_BYTES_PER_LINE) / 1048576
   return mb < 10 ? mb.toFixed(1) : Math.round(mb)
+}
+
+function formatBytes(n: number) {
+  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`
+  if (n >= 1 << 20) return `${Math.round(n / (1 << 20))} MB`
+  return `${Math.round(n / 1024)} KB`
 }
 
 function uptime(ms?: number) {
@@ -756,6 +762,29 @@ export default function App() {
                     About {logMemoryMB(logLines, state?.services.length ?? 0)} MB for {state?.services.length ?? 0} services. Lowering it drops the oldest lines now.
                     Saved in ~/.grid.
                   </small>
+                  <div
+                    className="setting-row"
+                    role="switch"
+                    aria-checked={!!state?.logFiles}
+                    onClick={() => state && saveSettings({ logFiles: !state.logFiles }).then(setState, (e) => setError(String(e.message ?? e)))}
+                  >
+                    <span className="setting-text">
+                      <span>Save logs to files</span>
+                      <small>
+                        Keeps the logs on this machine after the Grid restarts, at most {formatBytes(state?.logFileMax ?? 10 << 20)} per service
+                        (the current file and the previous one).
+                      </small>
+                    </span>
+                    <span className={`switch ${state?.logFiles ? 'on' : ''}`} />
+                  </div>
+                  {state?.logFiles && state.logDir && (
+                    <small className="seg-note">
+                      Folder:{' '}
+                      <code className="path" title="Click to copy" onClick={() => navigator.clipboard?.writeText(state.logDir!)}>
+                        {state.logDir}
+                      </code>
+                    </small>
+                  )}
                 </section>
                 <section>
                   <h4>Keyboard shortcuts</h4>
@@ -839,6 +868,13 @@ export default function App() {
                 </span>
               ) : null}
               {current.restarts > 0 && <span className="muted">restarts {current.restarts}</span>}
+              {(current.cpu !== undefined || current.mem) && (
+                <span className="muted" title="CPU (one core = 100%) and memory of the service's process tree">
+                  {current.cpu !== undefined && <>cpu {Math.round(current.cpu)}%</>}
+                  {current.cpu !== undefined && current.mem ? ' · ' : ''}
+                  {current.mem ? formatBytes(current.mem) : ''}
+                </span>
+              )}
               {current.url && (
                 <a className="link" href={current.url} target="_blank" rel="noreferrer">
                   {current.url} <ExternalIcon size={13} />

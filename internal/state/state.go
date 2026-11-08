@@ -25,6 +25,7 @@ type data struct {
 	Workspaces []Workspace `json:"workspaces"`
 	Last       string      `json:"last,omitempty"`
 	LogLines   int         `json:"logLines,omitempty"` // log history per service; 0 = default
+	LogFiles   *bool       `json:"logFiles,omitempty"` // write logs to files too; nil = on
 }
 
 // Store reads and writes ~/.grid/state.json. Safe for concurrent use.
@@ -94,6 +95,23 @@ func (s *Store) SetLogLines(n int) error {
 	defer s.mu.Unlock()
 	d := s.load()
 	d.LogLines = n
+	return s.save(d)
+}
+
+// LogFiles reports whether logs are also written to files (on unless turned off).
+func (s *Store) LogFiles() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v := s.load().LogFiles
+	return v == nil || *v
+}
+
+// SetLogFiles saves whether logs are written to files.
+func (s *Store) SetLogFiles(on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := s.load()
+	d.LogFiles = &on
 	return s.save(d)
 }
 

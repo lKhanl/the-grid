@@ -21,6 +21,11 @@ export interface Info {
   dependsOn?: string[]
   ready?: string
   runtimes?: string[]
+  /** CPU of the process tree in percent of one core, and resident memory in bytes (while running) */
+  cpu?: number
+  mem?: number
+  /** file the log is also written to */
+  logFile?: string
 }
 
 export interface RuntimeInfo {
@@ -42,6 +47,11 @@ export interface State {
   services: Info[]
   /** optional modules compiled into this build, e.g. "db" (go build -tags db) */
   features: string[]
+  /** folder of this workspace's log files, and the disk space per service (bytes) */
+  logDir?: string
+  logFileMax: number
+  /** logs are also written to files (Settings → Logs, on by default) */
+  logFiles: boolean
 }
 
 export interface Entry {
@@ -88,12 +98,15 @@ export async function reload() {
   await check(await fetch('/api/reload', { method: 'POST', headers: HEADERS }))
 }
 
-export async function setLogLines(n: number): Promise<State> {
+/** Saves the given settings (the others stay as they are). */
+export async function saveSettings(s: { logLines?: number; logFiles?: boolean }): Promise<State> {
   const r = await check(
-    await fetch('/api/settings', { method: 'PUT', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: JSON.stringify({ logLines: n }) }),
+    await fetch('/api/settings', { method: 'PUT', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: JSON.stringify(s) }),
   )
   return r.json()
 }
+
+export const setLogLines = (n: number) => saveSettings({ logLines: n })
 
 export async function fetchLogs(service: string, tail = 5000): Promise<Entry[]> {
   const r = await check(await fetch(`/api/services/${encodeURIComponent(service)}/logs?format=json&tail=${tail}`))
