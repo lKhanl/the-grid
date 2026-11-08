@@ -405,6 +405,12 @@ func writeValidated(path string, doc *yaml.Node) error {
 	}
 	enc.Close()
 	pretty := spaceOut(buf.Bytes())
+	if orig, err := os.ReadFile(path); err == nil {
+		// keep the user's layout: only the entries that changed are re-encoded
+		if kept, ok := preserveLayout(orig, doc); ok {
+			pretty = kept
+		}
+	}
 	buf.Reset()
 	buf.Write(pretty)
 	tmp := path + ".tmp" // same directory, so relative paths validate correctly

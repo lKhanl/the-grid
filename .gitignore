@@ -6,7 +6,7 @@ grid.yaml
 /bin/
 web/node_modules/
 .DS_Store
-grid.yaml.bak
+*.yaml.bak
 *.yaml.tmp
 target/
 demo/**/node_modules/
