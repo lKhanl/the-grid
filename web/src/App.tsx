@@ -1,112 +1,27 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { act, closeTerm, setLogLines, saveSettings, deleteService, openTerm, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State, type TermInfo } from './api'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { act, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State } from './api'
 import { LogView } from './LogView'
-import { ChangesIcon, ChevronIcon, DatabaseIcon, ClearIcon, CodeIcon, NodeIcon, ScriptIcon, JarIcon, SpringIcon, SettingsIcon, EditIcon, GridIcon, HammerIcon, TrashIcon, RuntimeTypeIcon, RuntimesIcon, ServicesIcon, WarnIcon, ExternalIcon, PlayIcon, PlusIcon, ReloadIcon, RestartIcon, SearchIcon, StopIcon, TerminalIcon } from './icons'
+import { GridIcon, PlayIcon, ReloadIcon, StopIcon } from './icons'
 import { ServiceForm } from './ServiceForm'
 import { RuntimeForm } from './RuntimeForm'
 import { Workspaces } from './Workspaces'
-import { ContextMenu, type MenuEntry } from './ContextMenu'
 import { NeonBorder } from './NeonBorder'
 import { applyTheme, loadTheme, type Theme } from './theme'
 import { ChangesList, DiffPane, useGit } from './Changes'
 import { DbForm, DbSidebar, DbWorkbench, useDatabase } from './Database'
 import type { DbKind } from './dbApi'
-import { loadPrefs, TermPanel, type NewTermPrefs } from './Terminals'
+import { loadPrefs, TermPanel } from './Terminals'
+import { ActivityBar, type Panel } from './ActivityBar'
+import { RuntimesList } from './RuntimesList'
+import { ServiceHeader } from './ServiceHeader'
+import { ServiceList } from './ServiceList'
+import { ServiceMenu } from './ServiceMenu'
+import { SettingsPanel } from './SettingsPanel'
+import { ACTIVE, Btn, TypeIcon, useTick } from './ui'
+import { useTerminals } from './useTerminals'
 
-const ACTIVE = new Set(['starting', 'building', 'running', 'stopping'])
 const SIDE_MIN = 220
 const SIDE_DEFAULT = 330
-
-type Panel = 'services' | 'changes' | 'database' | 'runtimes' | 'settings'
-
-const SHORTCUTS: [string, [string[], string][]][] = [
-  [
-    'Services',
-    [
-      [['↑', '↓'], 'Select service'],
-      [['S'], 'Start / stop'],
-      [['R'], 'Restart'],
-      [['C'], 'Clear log'],
-      [['/'], 'Filter log'],
-      [['Esc'], 'Clear filter'],
-      [['N'], 'New service'],
-      [['E'], 'Edit service'],
-    ],
-  ],
-  [
-    'Terminals',
-    [
-      [['Ctrl', '`'], 'Show / hide terminal panel'],
-      [['Ctrl', '⇧', '`'], 'New terminal'],
-    ],
-  ],
-]
-const BUILDS = new Set(['spring-boot', 'node'])
-
-const LOG_BYTES_PER_LINE = 2000 // measured (server RSS + browser heap) with ~300-byte Spring-style lines
-
-function logMemoryMB(lines: number, services: number) {
-  const mb = (lines * services * LOG_BYTES_PER_LINE) / 1048576
-  return mb < 10 ? mb.toFixed(1) : Math.round(mb)
-}
-
-function formatBytes(n: number) {
-  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`
-  if (n >= 1 << 20) return `${Math.round(n / (1 << 20))} MB`
-  return `${Math.round(n / 1024)} KB`
-}
-
-function uptime(ms?: number) {
-  if (!ms) return ''
-  let s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
-  const h = Math.floor(s / 3600)
-  s -= h * 3600
-  const m = Math.floor(s / 60)
-  s -= m * 60
-  return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`
-}
-
-function statusLabel(i: Info) {
-  if ((i.status === 'crashed' || i.status === 'exited') && i.exitCode !== undefined) return `${i.status} (${i.exitCode})`
-  return i.status
-}
-
-function useTick(ms: number) {
-  const [, set] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => set((x) => x + 1), ms)
-    return () => clearInterval(id)
-  }, [ms])
-}
-
-const TYPE_ICONS = { 'spring-boot': SpringIcon, node: NodeIcon, script: ScriptIcon, jar: JarIcon, custom: CodeIcon } as const
-
-/** Service type icon, colored by status. */
-function StatusIcon({ status, type, size = 16 }: { status: Info['status']; type: Info['type']; size?: number }) {
-  const I = TYPE_ICONS[type] ?? CodeIcon
-  return (
-    <span className={`status-icon st-${status}`} title={`${type} · ${status}`}>
-      <I size={size} />
-    </span>
-  )
-}
-
-function Btn(props: { icon: ReactNode; label?: string; title: string; onClick: () => void; disabled?: boolean; kind?: string }) {
-  return (
-    <button
-      className={`btn ${props.kind ?? ''}`}
-      title={props.title}
-      disabled={props.disabled}
-      onClick={(e) => {
-        e.stopPropagation()
-        props.onClick()
-      }}
-    >
-      {props.icon}
-      {props.label && <span>{props.label}</span>}
-    </button>
-  )
-}
 
 export default function App() {
   const store = useMemo(() => new LogStore(), [])
@@ -126,10 +41,6 @@ export default function App() {
   const [rtForm, setRtForm] = useState<{ editing: string | null } | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; service: string } | null>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
-  // drag & drop reordering inside a group
-  const [drag, setDrag] = useState<{ name: string; group: string } | null>(null)
-  const [dropAt, setDropAt] = useState<{ name: string; after: boolean } | null>(null)
-  const [dragGroup, setDragGroup] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     try {
       return new Set(JSON.parse(localStorage.getItem('grid.collapsed') ?? '[]'))
@@ -144,7 +55,6 @@ export default function App() {
       localStorage.setItem('grid.collapsed', JSON.stringify([...n]))
       return n
     })
-  const [groupDropAt, setGroupDropAt] = useState<{ group: string; after: boolean } | null>(null)
   // Off by default when the system asks for less motion (VDIs often turn animations off), but an explicit choice wins.
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, [])
   const [neon, setNeon] = useState(() => {
@@ -192,31 +102,17 @@ export default function App() {
   useEffect(() => {
     if (state && !hasDb && panel === 'database') setPanel('services')
   }, [state, hasDb, panel])
-  const [terms, setTerms] = useState<TermInfo[]>([])
-  const [selectedTerm, setSelectedTerm] = useState<string | null>(() => localStorage.getItem('grid.term'))
-  const [termOpen, setTermOpen] = useState(() => localStorage.getItem('grid.term.open') === 'on')
-  const [termMax, setTermMax] = useState(false)
   const filterRef = useRef<HTMLInputElement>(null)
   const selectedRef = useRef(selected)
   selectedRef.current = selected
   const selectedCwd = state?.services.find((s) => s.name === selected)?.cwd ?? ''
-  const selectedCwdRef = useRef(selectedCwd)
-  selectedCwdRef.current = selectedCwd
+  const term = useTerminals(selectedCwd, setError)
+  const { onServerList, setTermOpen } = term
 
   useEffect(() => {
     if (selected) localStorage.setItem('grid.selected', selected)
   }, [selected])
   useEffect(() => localStorage.setItem('grid.panel', panel), [panel])
-  useEffect(() => localStorage.setItem('grid.term.open', termOpen ? 'on' : 'off'), [termOpen])
-  useEffect(() => {
-    if (selectedTerm) localStorage.setItem('grid.term', selectedTerm)
-  }, [selectedTerm])
-  // keep a valid terminal selected when the list changes
-  useEffect(() => {
-    if (selectedTerm && terms.some((t) => t.id === selectedTerm)) return
-    const next = terms[terms.length - 1]?.id ?? null
-    if (next !== selectedTerm) setSelectedTerm(next)
-  }, [terms, selectedTerm])
   useEffect(() => localStorage.setItem('grid.neon', neon ? 'on' : 'off'), [neon])
   useEffect(() => applyTheme(theme), [theme])
 
@@ -237,7 +133,7 @@ export default function App() {
     open()
     window.addEventListener('hashchange', open)
     return () => window.removeEventListener('hashchange', open)
-  }, [])
+  }, [setTermOpen])
 
   // One SSE stream carries status changes and log lines for every service.
   useEffect(() => {
@@ -254,12 +150,9 @@ export default function App() {
         // ones (after a config change) don't, and the buffers stay as they are.
         // (set, not merge: after a server restart line numbers start again)
         if (ev.logs) for (const s of st.services) store.set(s.name, ev.logs[s.name] ?? [])
-        if (ev.terms) {
-          termsLoaded.current = true
-          setTerms(ev.terms)
-        }
+        if (ev.terms) onServerList(ev.terms, true)
       } else if (ev.type === 'terms') {
-        setTerms(ev.terms ?? [])
+        onServerList(ev.terms ?? [], false)
       } else if (ev.type === 'service' && ev.info) {
         const info = ev.info
         setState((st) => st && { ...st, services: st.services.map((s) => (s.name === info.name ? info : s)) })
@@ -273,7 +166,7 @@ export default function App() {
       }
     }
     return () => es.close()
-  }, [store])
+  }, [store, onServerList])
 
   useEffect(() => {
     if (!selected) return
@@ -292,59 +185,6 @@ export default function App() {
     },
     [store],
   )
-
-  const opening = useRef(false) // an open request is in flight (keeps the auto-open and a click from both spawning)
-  const termsLoaded = useRef(false)
-  const newTerm = useCallback((o: { service?: string } & Partial<NewTermPrefs>) => {
-    if (opening.current) return
-    opening.current = true
-    setError(null)
-    // A new terminal starts in the folder of the service whose log is open (unless it is opened for a specific service).
-    const cwd = o.cwd || (o.service ? '' : selectedCwdRef.current)
-    openTerm({ shell: o.shell || undefined, runtimes: o.runtimes, cwd: cwd || undefined, service: o.service }).then(
-      (t) => {
-        setTerms((list) => (list.some((x) => x.id === t.id) ? list : [...list, t]))
-        setSelectedTerm(t.id)
-        setTermOpen(true)
-      },
-      (e) => setError(`terminal: ${e.message}`),
-    ).finally(() => {
-      opening.current = false
-    })
-  }, [])
-  const killTerm = useCallback((id: string) => {
-    setTerms((list) => {
-      const i = list.findIndex((t) => t.id === id)
-      const next = list.filter((t) => t.id !== id)
-      // select the neighbour tab, like an editor does
-      setSelectedTerm((cur) => (cur === id ? (next[Math.min(i, next.length - 1)]?.id ?? null) : cur))
-      if (!next.length) setTermOpen(false) // no terminals left: nothing to show
-      return next
-    })
-    closeTerm(id).catch(() => {}) // already gone is fine
-  }, [])
-
-  // The panel is never empty: shown with no terminal at all (also after a restart with the panel left open), it opens one.
-  useEffect(() => {
-    if (termOpen && termsLoaded.current && terms.length === 0) newTerm(loadPrefs())
-  }, [termOpen, terms, newTerm])
-
-  // Ctrl+` shows / hides the terminals (opening one if none is running), Ctrl+Shift+` opens a new one.
-  const termsRef = useRef(terms)
-  termsRef.current = terms
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!e.ctrlKey || (e.key !== '`' && e.code !== 'Backquote')) return
-      e.preventDefault()
-      if (e.shiftKey) return newTerm(loadPrefs())
-      setTermOpen((open) => {
-        if (!open && !termsRef.current.some((t) => !t.exited)) newTerm(loadPrefs())
-        return !open
-      })
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [newTerm])
 
   const services = state?.services ?? []
   const groups = useMemo(() => {
@@ -366,34 +206,6 @@ export default function App() {
     reorderServices(next).catch((e) => setError(`reorder: ${e.message}`))
   }
 
-  /** Move a whole group before/after another one; services keep their group. */
-  function moveGroup(name: string, target: string, after: boolean) {
-    if (name === target) return
-    const order = groups.map(([g]) => g).filter((g) => g !== name)
-    order.splice(order.indexOf(target) + (after ? 1 : 0), 0, name)
-    saveOrder(order.flatMap((g) => groups.find(([x]) => x === g)![1].map((s) => s.name)))
-  }
-
-  const endDrag = () => {
-    setDrag(null)
-    setDropAt(null)
-    setDragGroup(null)
-    setGroupDropAt(null)
-  }
-
-  /** Move `name` before/after `target` (same group) and save the order. */
-  function moveService(name: string, target: string, after: boolean) {
-    if (!state || name === target) return
-    const all = state.services.map((s) => s.name)
-    const group = state.services.find((s) => s.name === name)?.group ?? ''
-    const slots = state.services.flatMap((s, i) => ((s.group ?? '') === group ? [i] : []))
-    const members = slots.map((i) => all[i]).filter((n) => n !== name)
-    const at = members.indexOf(target) + (after ? 1 : 0)
-    members.splice(at, 0, name)
-    const next = [...all]
-    slots.forEach((i, k) => (next[i] = members[k]))
-    saveOrder(next)
-  }
   const current = services.find((s) => s.name === selected) ?? null
 
   // Keyboard: ↑/↓ select, s start/stop, r restart, c clear, / filter, Esc clears filter.
@@ -476,15 +288,15 @@ export default function App() {
         {!connected && <div className="offline">disconnected, retrying…</div>}
         {panel === 'services' && (
           <>
-        <Btn icon={<PlayIcon />} label="Start all" title="Start all" kind="text green" onClick={() => run('all', 'start')} />
-        <Btn icon={<StopIcon />} label="Stop all" title="End of line: stop every program" kind="text red" onClick={() => run('all', 'stop')} />
-        <Btn
-          icon={<ReloadIcon />}
-          label="Reload config"
-          title={`Re-read ${state?.configPath ?? 'grid.yaml'}`}
-          kind="text"
-          onClick={() => reload().catch((e) => setError(`reload: ${e.message}`))}
-        />
+            <Btn icon={<PlayIcon />} label="Start all" title="Start all" kind="text green" onClick={() => run('all', 'start')} />
+            <Btn icon={<StopIcon />} label="Stop all" title="End of line: stop every program" kind="text red" onClick={() => run('all', 'stop')} />
+            <Btn
+              icon={<ReloadIcon />}
+              label="Reload config"
+              title={`Re-read ${state?.configPath ?? 'grid.yaml'}`}
+              kind="text"
+              onClick={() => reload().catch((e) => setError(`reload: ${e.message}`))}
+            />
           </>
         )}
       </header>
@@ -494,353 +306,51 @@ export default function App() {
         </div>
       )}
       <div className="main">
-        <nav className="activitybar">
-          <button
-            className={`activity ${panel === 'services' ? 'on' : ''}`}
-            aria-label="Services"
-            onClick={() => setPanel('services')}
-          >
-            <ServicesIcon size={22} />
-            <span className="activity-tip">Services</span>
-            {runningCount > 0 && <span className="activity-badge">{runningCount}</span>}
-          </button>
-          <button
-            className={`activity ${panel === 'changes' ? 'on' : ''}`}
-            aria-label="Changes"
-            onClick={() => setPanel('changes')}
-          >
-            <ChangesIcon size={22} />
-            <span className="activity-tip">Changes (git diff)</span>
-            {git.total > 0 && <span className="activity-badge">{git.total}</span>}
-          </button>
-          {hasDb && (
-            <button
-              className={`activity ${panel === 'database' ? 'on' : ''}`}
-              aria-label="Database"
-              onClick={() => setPanel('database')}
-            >
-              <DatabaseIcon size={22} />
-              <span className="activity-tip">Database</span>
-              {dbs.conns.some((c) => c.inTx) && <span className="activity-badge warn">!</span>}
-            </button>
-          )}
-          <button
-            className={`activity ${panel === 'runtimes' ? 'on' : ''}`}
-            aria-label="Runtimes"
-            onClick={() => setPanel('runtimes')}
-          >
-            <RuntimesIcon size={22} />
-            <span className="activity-tip">Runtimes</span>
-            {state?.runtimes.some((r) => r.error) && <span className="activity-badge warn">!</span>}
-          </button>
-          <div className="activity-spacer" />
-          <button
-            className={`activity ${termOpen ? 'on' : ''}`}
-            aria-label="Terminal"
-            aria-pressed={termOpen}
-            onClick={() => {
-              if (!termOpen && !terms.some((t) => !t.exited)) newTerm(loadPrefs())
-              setTermOpen((v) => !v)
-            }}
-          >
-            <TerminalIcon size={22} />
-            <span className="activity-tip">Terminal panel (Ctrl+`)</span>
-            {terms.some((t) => !t.exited) && <span className="activity-badge">{terms.filter((t) => !t.exited).length}</span>}
-          </button>
-          <button
-            className={`activity ${panel === 'settings' ? 'on' : ''}`}
-            aria-label="Settings"
-            onClick={() => setPanel('settings')}
-          >
-            <SettingsIcon size={21} />
-            <span className="activity-tip">Settings</span>
-          </button>
-        </nav>
+        <ActivityBar
+          panel={panel}
+          setPanel={setPanel}
+          runningCount={runningCount}
+          gitTotal={git.total}
+          hasDb={hasDb}
+          dbInTx={dbs.conns.some((c) => c.inTx)}
+          runtimesBroken={!!state?.runtimes.some((r) => r.error)}
+          termOpen={term.termOpen}
+          liveTerms={term.terms.filter((t) => !t.exited).length}
+          onToggleTerm={term.toggle}
+        />
         <aside className="sidebar" style={{ width: sideW }}>
           {panel === 'services' ? (
-            <>
-          <div className="sidebar-head divided">
-            <span>Services</span>
-            <Btn icon={<PlusIcon size={14} />} label="New" title="New service (N)" kind="text small" onClick={() => setForm({ editing: null })} />
-          </div>
-          {groups.map(([group, list]) => (
-            <div
-              key={group}
-              className={`group ${dragGroup === group ? 'dragging' : ''} ${
-                groupDropAt?.group === group && dragGroup !== group ? (groupDropAt.after ? 'drop-after' : 'drop-before') : ''
-              }`}
-              onDragOver={(e) => {
-                if (dragGroup === null) return // a service is being dragged: rows handle it
-                e.preventDefault()
-                e.dataTransfer.dropEffect = 'move'
-                const r = e.currentTarget.getBoundingClientRect()
-                const after = e.clientY > r.top + r.height / 2
-                if (groupDropAt?.group !== group || groupDropAt.after !== after) setGroupDropAt({ group, after })
-              }}
-              onDrop={(e) => {
-                if (dragGroup === null) return
-                e.preventDefault()
-                if (groupDropAt) moveGroup(dragGroup, groupDropAt.group, groupDropAt.after)
-                endDrag()
-              }}
-            >
-              {group && (
-                <div
-                  className="group-head"
-                  draggable
-                  title="Click to collapse or expand, drag to reorder"
-                  onClick={() => toggleGroup(group)}
-                  onDragStart={(e) => {
-                    e.dataTransfer.effectAllowed = 'move'
-                    e.dataTransfer.setData('text/plain', 'group:' + group)
-                    setDragGroup(group)
-                  }}
-                  onDragEnd={endDrag}
-                >
-                  <span className={`group-chevron ${collapsed.has(group) ? '' : 'open'}`}>
-                    <ChevronIcon size={13} />
-                  </span>
-                  <span className="group-name">{group}</span>
-                  {collapsed.has(group) && (
-                    <span className="group-count">
-                      {list.some((s) => ACTIVE.has(s.status)) && <span className="dot dot-running" />}
-                      {list.filter((s) => s.status === 'running').length}/{list.length}
-                      {list.some((s) => s.status === 'crashed') && <span className="group-crashed">!</span>}
-                    </span>
-                  )}
-                  <span className="row-actions">
-                    <Btn icon={<PlusIcon size={14} />} title={`New service in ${group}`} onClick={() => setForm({ editing: null, group })} />
-                    <Btn icon={<PlayIcon size={14} />} title={`Start ${group}`} onClick={() => run(group, 'start')} kind="green" />
-                    <Btn icon={<StopIcon size={14} />} title={`Stop ${group}`} onClick={() => run(group, 'stop')} kind="red" />
-                  </span>
-                </div>
-              )}
-              {!(group && collapsed.has(group)) && list.map((s) => {
-                const active = ACTIVE.has(s.status)
-                return (
-                  <div
-                    key={s.name}
-                    className={`row ${s.name === selected ? 'selected' : ''} ${group ? 'indent' : ''} ${drag?.name === s.name ? 'dragging' : ''} ${
-                      dropAt?.name === s.name && drag?.name !== s.name ? (dropAt.after ? 'drop-after' : 'drop-before') : ''
-                    }`}
-                    onClick={() => setSelected(s.name)}
-                    onDoubleClick={() => run(s.name, active ? 'restart' : 'start')}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.effectAllowed = 'move'
-                      e.dataTransfer.setData('text/plain', s.name)
-                      setDrag({ name: s.name, group })
-                    }}
-                    onDragOver={(e) => {
-                      if (!drag || drag.group !== group) return // only within the same group
-                      e.preventDefault()
-                      e.dataTransfer.dropEffect = 'move'
-                      const r = e.currentTarget.getBoundingClientRect()
-                      const after = e.clientY > r.top + r.height / 2
-                      if (dropAt?.name !== s.name || dropAt.after !== after) setDropAt({ name: s.name, after })
-                    }}
-                    onDrop={(e) => {
-                      if (!drag) return // a group is being dragged: let the group handle it
-                      e.preventDefault()
-                      e.stopPropagation()
-                      if (dropAt) moveService(drag.name, dropAt.name, dropAt.after)
-                      endDrag()
-                    }}
-                    onDragEnd={endDrag}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      setSelected(s.name)
-                      setMenu({ x: e.clientX, y: e.clientY, service: s.name })
-                    }}
-                    title={s.description || s.command}
-                  >
-                    <StatusIcon status={s.status} type={s.type} />
-                    <span className="name">{s.name}</span>
-                    {unread[s.name] && <span className={`unread unread-${unread[s.name]}`} />}
-                    <span className="meta">
-                      {s.status === 'running'
-                        ? uptime(s.startedAt)
-                        : s.status === 'starting' || s.status === 'building'
-                          ? `${s.status} ${s.startedAt ? uptime(s.startedAt) : '…'}`
-                          : s.status === 'stopped'
-                            ? ''
-                            : statusLabel(s)}
-                    </span>
-                    <span className="row-actions">
-                      {active ? (
-                        <Btn icon={<StopIcon size={14} />} title="Stop" onClick={() => run(s.name, 'stop')} kind="red" />
-                      ) : (
-                        <Btn icon={<PlayIcon size={14} />} title="Start" onClick={() => run(s.name, 'start')} kind="green" />
-                      )}
-                      <Btn icon={<RestartIcon size={14} />} title="Restart" onClick={() => run(s.name, 'restart')} />
-                      <Btn icon={<EditIcon size={14} />} title="Edit (e)" onClick={() => setForm({ editing: s.name })} />
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          ))}
-          {state && state.configPath !== '' && services.length === 0 && (
-            <div className="empty">
-              No services yet.
-              <Btn icon={<PlusIcon size={14} />} label="Add your first service" title="New service" kind="text" onClick={() => setForm({ editing: null })} />
-            </div>
-          )}
-            </>
+            <ServiceList
+              state={state}
+              groups={groups}
+              collapsed={collapsed}
+              toggleGroup={toggleGroup}
+              selected={selected}
+              setSelected={setSelected}
+              unread={unread}
+              run={run}
+              onNew={(group) => setForm({ editing: null, group })}
+              onEdit={(name) => setForm({ editing: name })}
+              onMenu={(x, y, service) => setMenu({ x, y, service })}
+              onReorder={saveOrder}
+            />
           ) : panel === 'database' ? (
             <DbSidebar dbs={dbs} />
           ) : panel === 'changes' ? (
-            <ChangesList git={git} typeIcon={(t) => { const I = TYPE_ICONS[t as keyof typeof TYPE_ICONS] ?? CodeIcon; return <I size={15} /> }} />
+            <ChangesList git={git} typeIcon={(t) => <TypeIcon type={t} size={15} />} />
           ) : panel === 'settings' ? (
-            <>
-              <div className="sidebar-head divided">
-                <span>Settings</span>
-              </div>
-              <div className="settings">
-                <section>
-                  <h4>Theme</h4>
-                  <div className="theme-cards">
-                    {(
-                      [
-                        ['grid', 'The Grid', 'Cyan light lines on black, neon.'],
-                        ['basic', 'Basic', 'Calm neutral greys, no glow.'],
-                      ] as [Theme, string, string][]
-                    ).map(([id, label, help]) => (
-                      <button key={id} className={`theme-card ${theme === id ? 'on' : ''}`} onClick={() => setTheme(id)}>
-                        <span className={`swatch swatch-${id}`}>
-                          <i />
-                          <i />
-                          <i />
-                        </span>
-                        <strong>{label}</strong>
-                        <small>{help}</small>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-                <section>
-                  <h4>Effects</h4>
-                  <div
-                    className={`setting-row ${theme !== 'grid' ? 'disabled' : ''}`}
-                    role="switch"
-                    aria-checked={neon}
-                    onClick={() => theme === 'grid' && setNeon((v) => !v)}
-                  >
-                    <span className="setting-text">
-                      <span>Neon line around the window</span>
-                      <small>
-                        {theme !== 'grid'
-                          ? 'Only in The Grid theme.'
-                          : reducedMotion
-                            ? 'Your system asks for reduced motion, so it starts off here.'
-                            : 'A light cycle running along the edges.'}
-                      </small>
-                    </span>
-                    <span className={`switch ${neon && theme === 'grid' ? 'on' : ''}`} />
-                  </div>
-                </section>
-                <section>
-                  <h4>Logs</h4>
-                  <div className="setting-text">
-                    <span>History per service</span>
-                    <small>Lines kept in memory. Fewer lines switch faster and use less memory.</small>
-                  </div>
-                  <div className="seg" role="radiogroup" aria-label="Log lines per service">
-                    {(state?.logLineOptions ?? [1000, 2500, 5000, 10000]).map((n) => (
-                      <button
-                        key={n}
-                        role="radio"
-                        aria-checked={logLines === n}
-                        className={logLines === n ? 'on' : ''}
-                        onClick={() => setLogLines(n).then(setState, (e) => setError(String(e.message ?? e)))}
-                      >
-                        {n.toLocaleString('en-US')}
-                      </button>
-                    ))}
-                  </div>
-                  <small className="seg-note">
-                    About {logMemoryMB(logLines, state?.services.length ?? 0)} MB for {state?.services.length ?? 0} services. Lowering it drops the oldest lines now.
-                    Saved in ~/.grid.
-                  </small>
-                  <div
-                    className="setting-row"
-                    role="switch"
-                    aria-checked={!!state?.logFiles}
-                    onClick={() => state && saveSettings({ logFiles: !state.logFiles }).then(setState, (e) => setError(String(e.message ?? e)))}
-                  >
-                    <span className="setting-text">
-                      <span>Save logs to files</span>
-                      <small>
-                        Keeps the logs on this machine after the Grid restarts, at most {formatBytes(state?.logFileMax ?? 10 << 20)} per service
-                        (the current file and the previous one).
-                      </small>
-                    </span>
-                    <span className={`switch ${state?.logFiles ? 'on' : ''}`} />
-                  </div>
-                  {state?.logFiles && state.logDir && (
-                    <small className="seg-note">
-                      Folder:{' '}
-                      <code className="path" title="Click to copy" onClick={() => navigator.clipboard?.writeText(state.logDir!)}>
-                        {state.logDir}
-                      </code>
-                    </small>
-                  )}
-                </section>
-                <section>
-                  <h4>Keyboard shortcuts</h4>
-                  {SHORTCUTS.map(([title, list]) => (
-                    <div key={title} className="shortcut-group">
-                      <div className="shortcut-title">{title}</div>
-                      {list.map(([keys, label]) => (
-                        <div key={label} className="hint">
-                          <span className="keys">
-                            {keys.map((k) => (
-                              <kbd key={k}>{k}</kbd>
-                            ))}
-                          </span>
-                          <span>{label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </section>
-                <div className="settings-foot">
-                  {state?.version && <span className="settings-version">The Grid {state.version}</span>}
-                </div>
-              </div>
-            </>
+            <SettingsPanel
+              state={state}
+              setState={setState}
+              setError={setError}
+              theme={theme}
+              setTheme={setTheme}
+              neon={neon}
+              setNeon={setNeon}
+              reducedMotion={reducedMotion}
+            />
           ) : (
-            <>
-              <div className="sidebar-head divided">
-                <span>Runtimes</span>
-                <Btn icon={<PlusIcon size={14} />} label="New" title="New runtime (java / node / script)" kind="text small" onClick={() => setRtForm({ editing: null })} />
-              </div>
-              {state?.runtimes.map((r) => {
-                const users = services.filter((s) => s.runtimes?.includes(r.name)).map((s) => s.name)
-                return (
-                  <div
-                    key={r.name}
-                    className="rt-item"
-                    onClick={() => setRtForm({ editing: r.name })}
-                    title={`${r.type} · ${r.home}${r.error ? `\n⚠ ${r.error}` : ''}${users.length ? `\nUsed by ${users.join(', ')}` : ''}`}
-                  >
-                    <RuntimeTypeIcon type={r.type} size={18} />
-                    <span className="name">{r.name}</span>
-                    {r.error && (
-                      <span className="rt-warn">
-                        <WarnIcon size={14} />
-                      </span>
-                    )}
-                  </div>
-                )
-              })}
-              {state && state.runtimes.length === 0 && (
-                <div className="empty rt-empty">
-                  No runtimes yet.
-                  <Btn icon={<PlusIcon size={14} />} label="Add a runtime" title="New runtime" kind="text" onClick={() => setRtForm({ editing: null })} />
-                </div>
-              )}
-            </>
+            <RuntimesList state={state} onOpen={(editing) => setRtForm({ editing })} />
           )}
         </aside>
         <div
@@ -853,105 +363,36 @@ export default function App() {
           title="Drag to resize, double-click to reset"
         />
         <section className="detail">
-          {panel === 'changes' && !(termOpen && termMax) && <DiffPane git={git} />}
-          {panel === 'database' && !(termOpen && termMax) && <DbWorkbench dbs={dbs} />}
-          <div className="detail-pane" style={{ display: (termOpen && termMax) || panel === 'changes' || panel === 'database' || panel === 'runtimes' ? 'none' : 'flex' }}>
-          {current ? (
-            <div className="toolbar">
-              <StatusIcon status={current.status} type={current.type} size={18} />
-              <span className="title">{current.name}</span>
-              <span className={`badge badge-${current.status}`}>{statusLabel(current)}</span>
-              {current.pid ? <span className="muted">pid {current.pid}</span> : null}
-              {current.startedAt ? (
-                <span className="muted">
-                  {current.status === 'starting' ? 'starting for' : current.status === 'building' ? 'building for' : 'up'} {uptime(current.startedAt)}
-                </span>
-              ) : null}
-              {current.restarts > 0 && <span className="muted">restarts {current.restarts}</span>}
-              {(current.cpu !== undefined || current.mem) && (
-                <span className="muted" title="CPU (one core = 100%) and memory of the service's process tree">
-                  {current.cpu !== undefined && <>cpu {Math.round(current.cpu)}%</>}
-                  {current.cpu !== undefined && current.mem ? ' · ' : ''}
-                  {current.mem ? formatBytes(current.mem) : ''}
-                </span>
-              )}
-              {current.url && (
-                <a className="link" href={current.url} target="_blank" rel="noreferrer">
-                  {current.url} <ExternalIcon size={13} />
-                </a>
-              )}
-              <div className="spacer" />
-              {ACTIVE.has(current.status) ? (
-                <Btn icon={<StopIcon />} label="Stop" title="Derezz (s)" kind="text red" onClick={() => run(current.name, 'stop')} />
-              ) : (
-                <Btn icon={<PlayIcon />} label="Start" title="Start (s)" kind="text green" onClick={() => run(current.name, 'start')} />
-              )}
-              <Btn icon={<RestartIcon />} label="Restart" title="Restart (r)" kind="text" onClick={() => run(current.name, 'restart')} />
-              <Btn icon={<ClearIcon />} label="Clear" title="Clear log (c)" kind="text" onClick={() => run(current.name, 'clear')} />
-              <Btn icon={<EditIcon />} label="Edit" title="Edit service (e)" kind="text" onClick={() => setForm({ editing: current.name })} />
-              <label className="filter-wrap">
-                <SearchIcon size={14} />
-              <input
-                ref={filterRef}
-                className="filter"
-                placeholder="Filter log  ( / )"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              />
-              </label>
-            </div>
-          ) : (
-            <div className="toolbar muted">No service selected</div>
-          )}
-          {current && (
-            <div className="subbar" title={current.cwd}>
-              {current.runtimes?.map((name) => {
-                const rt = state?.runtimes.find((r) => r.name === name)
-                return (
-                  <span
-                    key={name}
-                    className={`chip chip-${rt?.type ?? 'script'} ${rt?.error ? 'chip-error' : ''}`}
-                    title={rt ? `${rt.type}: ${rt.home}${rt.error ? `\n⚠ ${rt.error}` : ''}` : 'unknown runtime'}
-                  >
-                    {name}
-                  </span>
-                )
-              })}
-              {!current.runtimes?.length && (
-                <span className="chip chip-system" title="java / mvn / node come from the system PATH">
-                  system PATH
-                </span>
-              )}
-              {current.build && (
-                <span className="sub-step" title="Runs before every start">
-                  <HammerIcon size={12} />
-                  <code>{current.build}</code>
-                </span>
-              )}
-              <span className="sub-step">
-                {current.build && <PlayIcon size={11} />}
-                <code>{current.command}</code>
-              </span>
-              <span className="muted"> in {current.cwd}</span>
-              {current.dependsOn?.length ? <span className="muted"> · after {current.dependsOn.join(', ')}</span> : null}
-              {current.ready ? <span className="muted"> · ready on {current.ready}</span> : null}
-            </div>
-          )}
-          <LogView service={selected} store={store} filter={filter} theme={theme} maxLines={logLines} known={serviceNames} />
+          {panel === 'changes' && !(term.termOpen && term.termMax) && <DiffPane git={git} />}
+          {panel === 'database' && !(term.termOpen && term.termMax) && <DbWorkbench dbs={dbs} />}
+          <div
+            className="detail-pane"
+            style={{ display: (term.termOpen && term.termMax) || panel === 'changes' || panel === 'database' || panel === 'runtimes' ? 'none' : 'flex' }}
+          >
+            <ServiceHeader
+              current={current}
+              state={state}
+              run={run}
+              onEdit={(name) => setForm({ editing: name })}
+              filter={filter}
+              setFilter={setFilter}
+              filterRef={filterRef}
+            />
+            <LogView service={selected} store={store} filter={filter} theme={theme} maxLines={logLines} known={serviceNames} />
           </div>
-          {(termOpen || terms.length > 0) && (
+          {(term.termOpen || term.terms.length > 0) && (
             <TermPanel
-              open={termOpen}
+              open={term.termOpen}
               state={state}
               defaultCwd={selectedCwd}
-              terms={terms}
-              selected={selectedTerm}
+              terms={term.terms}
+              selected={term.selectedTerm}
               theme={theme}
-              maximized={termMax}
-              onMaximize={setTermMax}
-              onSelect={setSelectedTerm}
-              onKill={killTerm}
-              onNew={(p) => newTerm(p)}
+              maximized={term.termMax}
+              onMaximize={term.setTermMax}
+              onSelect={term.setSelectedTerm}
+              onKill={term.killTerm}
+              onNew={(p) => term.newTerm(p)}
               onHide={() => setTermOpen(false)}
             />
           )}
@@ -975,39 +416,20 @@ export default function App() {
           }}
         />
       )}
-      {menu && state && (() => {
-        const s = state.services.find((x) => x.name === menu.service)
-        if (!s) return null
-        const active = ACTIVE.has(s.status)
-        const dependents = state.services.filter((x) => x.dependsOn?.includes(s.name)).map((x) => x.name)
-        const items: MenuEntry[] = [
-          active
-            ? { label: 'Stop (derezz)', icon: <StopIcon size={14} />, hint: 'S', kind: 'red', onSelect: () => run(s.name, 'stop') }
-            : { label: 'Start', icon: <PlayIcon size={14} />, hint: 'S', kind: 'green', onSelect: () => run(s.name, 'start') },
-          ...(!active && BUILDS.has(s.type)
-            ? [{ label: 'Run without build', icon: <PlayIcon size={14} />, onSelect: () => run(s.name, 'start-nobuild') }]
-            : []),
-          { label: 'Restart', icon: <RestartIcon size={14} />, hint: 'R', onSelect: () => run(s.name, 'restart') },
-          { label: 'Clear log', icon: <ClearIcon size={14} />, hint: 'C', onSelect: () => run(s.name, 'clear') },
-          ...(s.url ? [{ label: 'Open URL', icon: <ExternalIcon size={14} />, onSelect: () => window.open(s.url, '_blank', 'noreferrer') }] : []),
-          { label: 'Open terminal here', icon: <TerminalIcon size={14} />, onSelect: () => newTerm({ ...loadPrefs(), service: s.name }) },
-          'sep',
-          { label: 'Edit…', icon: <EditIcon size={14} />, hint: 'E', onSelect: () => setForm({ editing: s.name }) },
-          {
-            label: dependents.length ? `Delete (needed by ${dependents.join(', ')})` : 'Delete',
-            icon: <TrashIcon size={14} />,
-            kind: 'danger',
-            disabled: dependents.length > 0,
-            confirm: active ? 'Stop & delete? Click again' : 'Click again to delete',
-            onSelect: () =>
-              deleteService(s.name).then(
-                () => setSelected((cur) => (cur === s.name ? null : cur)),
-                (e) => setError(`delete ${s.name}: ${e.message}`),
-              ),
-          },
-        ]
-        return <ContextMenu x={menu.x} y={menu.y} title={s.name} items={items} onClose={closeMenu} />
-      })()}
+      {menu && state && (
+        <ServiceMenu
+          state={state}
+          service={menu.service}
+          x={menu.x}
+          y={menu.y}
+          run={run}
+          onEdit={(name) => setForm({ editing: name })}
+          onTerminal={(service) => term.newTerm({ ...loadPrefs(), service })}
+          onDeleted={(name) => setSelected((cur) => (cur === name ? null : cur))}
+          setError={setError}
+          onClose={closeMenu}
+        />
+      )}
       {(wsOpen || noWorkspace) && state && (
         <Workspaces
           current={state.configPath}

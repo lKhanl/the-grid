@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   checkPath,
   deleteService,
@@ -22,20 +22,16 @@ import {
   type SpringSpec,
   type State,
 } from './api'
-import { CheckIcon, CloseIcon, CodeIcon, FolderIcon, HammerIcon, JarIcon, NodeIcon, PlayIcon, PlusIcon, ScriptIcon, SpringIcon, TrashIcon, WarnIcon } from './icons'
+import { CloseIcon, FolderIcon, TrashIcon, WarnIcon } from './icons'
 import { RuntimeForm } from './RuntimeForm'
 import { FolderPicker } from './FolderPicker'
+import { CommandField, JarFields, NodeFields, ScriptFields, ShellField, SpringFields, TYPES } from './ServiceTypeFields'
+import { AdvancedSection, CommandPreview, DetectLine, EnvSection, GeneralSection, RuntimeField, StartupSection, type ReadyMode } from './ServiceFormSections'
+
+// The service form: state, project detection and saving are here; the fields
+// live in ServiceTypeFields.tsx (per type) and ServiceFormSections.tsx.
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
-const SHELLS = ['cmd', 'powershell', 'pwsh', 'bash', 'C:/Program Files/Git/bin/bash.exe', '/bin/zsh']
-
-const TYPES: { type: ServiceType; label: string; icon: ReactNode; help: string }[] = [
-  { type: 'spring-boot', label: 'Spring Boot', icon: <SpringIcon size={20} />, help: 'Maven project. Every start builds the app, then runs it.' },
-  { type: 'node', label: 'Node', icon: <NodeIcon size={20} />, help: 'Runs a package.json script; installs dependencies when they change.' },
-  { type: 'script', label: 'Script', icon: <ScriptIcon size={20} />, help: 'A .bat, .cmd, .ps1, .sh or .py file in the folder.' },
-  { type: 'jar', label: 'Jar', icon: <JarIcon size={20} />, help: 'An already built .jar, run with java -jar (no build step).' },
-  { type: 'custom', label: 'Custom command', icon: <CodeIcon size={20} />, help: 'Any command line, run as you type it.' },
-]
 
 interface Props {
   state: State
@@ -50,8 +46,6 @@ interface Props {
   onDone: (select: string | null, then?: 'start' | 'restart') => void
 }
 
-type ReadyMode = 'none' | 'port' | 'log'
-
 const slug = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '')
 
 export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose, onDone }: Props) {
@@ -65,7 +59,6 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
   const [preview, setPreview] = useState<{ build: string; run: string; error?: string } | null>(null)
   const [newRuntime, setNewRuntime] = useState(false)
   const [picker, setPicker] = useState(false)
-  const [profileInput, setProfileInput] = useState('')
   // Fields the user changed by hand are never overwritten by detection.
   const touched = useRef(new Set<string>(editing ? ['*'] : []))
   const nameRef = useRef<HTMLInputElement>(null)
@@ -296,24 +289,6 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
     set('dependsOn', cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name])
   }
 
-  function toggleProfile(p: string) {
-    const cur = spec?.spring?.profiles ?? []
-    setSpring('profiles', cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p])
-  }
-
-  const env = spec?.env ?? []
-  const setEnv = (i: number, k: 'key' | 'value', v: string) => set('env', env.map((e, j) => (j === i ? { ...e, [k]: v } : e)))
-
-  const springMods = det?.spring?.modules ?? []
-  const selMod = springMods.find((m) => m.path === (spec?.spring?.module ?? ''))
-  const detProfiles = selMod?.profiles ?? []
-  const profiles = spec?.spring?.profiles ?? []
-  const allProfiles = [...new Set([...detProfiles, ...profiles])]
-  const javaWanted = det?.spring?.javaVersion
-  const javaPicked = state.runtimes.find((r) => r.type === 'java' && spec?.runtime?.includes(r.name))
-  const pickedMajor = Number(javaPicked?.name.match(/\d+/)?.[0] ?? 0)
-  const javaTooOld = !!javaWanted && pickedMajor > 0 && pickedMajor < Number(javaWanted.match(/\d+/)?.[0] ?? 0)
-
   return (
     <div
       className="modal-backdrop"
@@ -379,425 +354,35 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
             <section className="form-section">
               <h3>Run</h3>
 
-              {spec.type === 'spring-boot' && (
-                <>
-                  <div className="grid-2">
-                    <label className="field">
-                      <span>Application</span>
-                      {springMods.length > 0 ? (
-                        <select value={spec.spring?.module ?? ''} onChange={(e) => setSpring('module', e.target.value)}>
-                          {springMods.map((m) => (
-                            <option key={m.path} value={m.path}>
-                              {(m.path || m.artifactId) + (m.mainClass ? `  —  ${m.mainClass.split('.').pop()}` : '')}
-                            </option>
-                          ))}
-                          {selMod === undefined && <option value={spec.spring?.module ?? ''}>{spec.spring?.module || '(root)'}</option>}
-                        </select>
-                      ) : (
-                        <input className="mono" value={spec.spring?.module ?? ''} onChange={(e) => setSpring('module', e.target.value)} placeholder="module folder (empty = root)" />
-                      )}
-                      {selMod?.mainClass && <em className="muted small mono">{selMod.mainClass}</em>}
-                    </label>
-                    <div className="field">
-                      <span>How to run</span>
-                      <div className="segmented">
-                        <button type="button" className={spec.spring?.mode !== 'run' ? 'on' : ''} onClick={() => setSpring('mode', 'package')}>
-                          Build jar, then run
-                        </button>
-                        <button type="button" className={spec.spring?.mode === 'run' ? 'on' : ''} onClick={() => setSpring('mode', 'run')}>
-                          mvn spring-boot:run
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="field">
-                    <span>Profiles</span>
-                    <div className="chips">
-                      {allProfiles.map((p) => {
-                        const on = profiles.includes(p)
-                        return (
-                          <button key={p} type="button" className={`chip toggle ${on ? 'on' : ''}`} onClick={() => toggleProfile(p)}>
-                            {on && <CheckIcon size={12} />}
-                            {p}
-                          </button>
-                        )
-                      })}
-                      <input
-                        className="chip-input"
-                        value={profileInput}
-                        placeholder={allProfiles.length ? '+ other' : 'e.g. local'}
-                        onChange={(e) => setProfileInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          const v = profileInput.trim()
-                          if ((e.key === 'Enter' || e.key === ',') && v) {
-                            e.preventDefault()
-                            if (!profiles.includes(v)) setSpring('profiles', [...profiles, v])
-                            setProfileInput('')
-                          }
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="grid-2">
-                    <label className="field">
-                      <span>VM options</span>
-                      <input className="mono" value={spec.spring?.jvmArgs ?? ''} onChange={(e) => setSpring('jvmArgs', e.target.value)} placeholder="-Xmx1g -Dfile.encoding=UTF-8" />
-                    </label>
-                    <label className="field">
-                      <span>Program arguments</span>
-                      <input className="mono" value={spec.spring?.args ?? ''} onChange={(e) => setSpring('args', e.target.value)} placeholder="--server.port=8081" />
-                    </label>
-                  </div>
-                  <div className="checks">
-                    {spec.spring?.mode !== 'run' && (
-                      <label className="check" title="Passes -Dmaven.test.skip=true: tests are neither run nor compiled (faster). Turn off if a module needs another module's test jar.">
-                        <input type="checkbox" checked={spec.spring?.skipTests ?? true} onChange={(e) => setSpring('skipTests', e.target.checked)} />
-                        <span>Skip tests</span>
-                      </label>
-                    )}
-                    {spec.spring?.mode !== 'run' && (
-                      <label className="check" title="By default the build is skipped when nothing under src/ or in a pom.xml is newer than the jar. Turn this on to run mvn package on every start (for example when a dependency changed in ~/.m2).">
-                        <input type="checkbox" checked={spec.spring?.alwaysBuild ?? false} onChange={(e) => setSpring('alwaysBuild', e.target.checked)} />
-                        <span>Always rebuild</span>
-                      </label>
-                    )}
-                    <label className="check">
-                      <input type="checkbox" checked={spec.spring?.offline ?? false} onChange={(e) => setSpring('offline', e.target.checked)} />
-                      <span>Offline (mvn -o)</span>
-                    </label>
-                  </div>
-                </>
-              )}
+              {spec.type === 'spring-boot' && <SpringFields spec={spec} det={det} setSpring={setSpring} />}
+              {spec.type === 'node' && <NodeFields spec={spec} det={det} setNode={setNode} />}
+              {spec.type === 'script' && <ScriptFields spec={spec} det={det} setScript={setScript} />}
+              {spec.type === 'jar' && <JarFields spec={spec} det={det} setJar={setJar} />}
+              {spec.type === 'custom' && <CommandField spec={spec} set={set} />}
+              {(spec.type === 'custom' || spec.type === 'script') && <ShellField spec={spec} set={set} />}
 
-              {spec.type === 'node' && (
-                <>
-                  <div className="grid-2">
-                    <label className="field">
-                      <span>Script</span>
-                      {det?.node?.scripts.length ? (
-                        <select value={spec.node?.script ?? ''} onChange={(e) => setNode('script', e.target.value)}>
-                          {!det.node.scripts.includes(spec.node?.script ?? '') && <option value={spec.node?.script ?? ''}>{spec.node?.script || '—'}</option>}
-                          {det.node.scripts.map((s) => (
-                            <option key={s} value={s}>
-                              {s}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input className="mono" value={spec.node?.script ?? ''} onChange={(e) => setNode('script', e.target.value)} placeholder="dev" />
-                      )}
-                      {det?.node?.commands?.[spec.node?.script ?? ''] && <em className="muted small mono">{det.node.commands[spec.node!.script]}</em>}
-                    </label>
-                    <label className="field">
-                      <span>Arguments</span>
-                      <input className="mono" value={spec.node?.args ?? ''} onChange={(e) => setNode('args', e.target.value)} placeholder="--host" />
-                    </label>
-                  </div>
-                  <div className="grid-2">
-                    <label className="field">
-                      <span>Install dependencies</span>
-                      <select value={spec.node?.install || 'if-changed'} onChange={(e) => setNode('install', e.target.value)}>
-                        <option value="if-changed">When package.json / lock file changed</option>
-                        <option value="always">Before every start</option>
-                        <option value="never">Never</option>
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Package manager</span>
-                      <select value={spec.node?.packageManager || 'auto'} onChange={(e) => setNode('packageManager', e.target.value)}>
-                        <option value="auto">Auto{det?.node ? ` (${det.node.packageManager})` : ''}</option>
-                        <option value="npm">npm</option>
-                        <option value="yarn">yarn</option>
-                        <option value="pnpm">pnpm</option>
-                      </select>
-                    </label>
-                  </div>
-                </>
-              )}
+              <RuntimeField spec={spec} state={state} det={det} onToggle={toggleRuntime} onNew={() => setNewRuntime(true)} />
 
-              {spec.type === 'script' && (
-                <div className="grid-2">
-                  <label className="field">
-                    <span>Script file</span>
-                    <input list="pr-scripts" className="mono" value={spec.script?.file ?? ''} onChange={(e) => setScript('file', e.target.value)} placeholder="start.bat" />
-                    <datalist id="pr-scripts">
-                      {det?.scripts?.map((s) => (
-                        <option key={s} value={s} />
-                      ))}
-                    </datalist>
-                  </label>
-                  <label className="field">
-                    <span>Arguments</span>
-                    <input className="mono" value={spec.script?.args ?? ''} onChange={(e) => setScript('args', e.target.value)} />
-                  </label>
-                </div>
-              )}
-
-              {spec.type === 'jar' && (
-                <>
-                  <div className="grid-2">
-                    <label className="field">
-                      <span>Jar file *</span>
-                      <input list="pr-jars" className="mono" value={spec.jar?.file ?? ''} onChange={(e) => setJar('file', e.target.value)} placeholder="target/app.jar  (or target/*.jar)" />
-                      <datalist id="pr-jars">
-                        {det?.jars?.map((s) => (
-                          <option key={s} value={s} />
-                        ))}
-                      </datalist>
-                    </label>
-                    <label className="field">
-                      <span>Program arguments</span>
-                      <input className="mono" value={spec.jar?.args ?? ''} onChange={(e) => setJar('args', e.target.value)} placeholder="--server.port=8081" />
-                    </label>
-                  </div>
-                  <label className="field">
-                    <span>VM options</span>
-                    <input className="mono" value={spec.jar?.jvmArgs ?? ''} onChange={(e) => setJar('jvmArgs', e.target.value)} placeholder="-Xmx1g -Dfile.encoding=UTF-8" />
-                  </label>
-                </>
-              )}
-
-              {spec.type === 'custom' && (
-                <label className="field">
-                  <span>Command *</span>
-                  <textarea
-                    className="mono"
-                    rows={2}
-                    value={spec.command}
-                    onChange={(e) => set('command', e.target.value)}
-                    placeholder="java -jar target/app.jar"
-                  />
-                </label>
-              )}
-
-              {(spec.type === 'custom' || spec.type === 'script') && (
-                <label className="field narrow-2">
-                  <span>Shell</span>
-                  <input list="pr-shells" value={spec.shell} onChange={(e) => set('shell', e.target.value)} placeholder="default (cmd on Windows, sh elsewhere)" />
-                  <datalist id="pr-shells">
-                    {SHELLS.map((s) => (
-                      <option key={s} value={s} />
-                    ))}
-                  </datalist>
-                </label>
-              )}
-
-              <div className="field">
-                <span>Runtime{spec.type === 'spring-boot' ? ' (Java + Maven)' : spec.type === 'jar' ? ' (Java)' : spec.type === 'node' ? ' (Node)' : ''}</span>
-                <div className="chips">
-                  {state.runtimes.map((r) => {
-                    const on = spec.runtime?.includes(r.name)
-                    return (
-                      <button
-                        key={r.name}
-                        type="button"
-                        className={`chip toggle chip-${r.type} ${on ? 'on' : ''} ${r.error ? 'chip-error' : ''}`}
-                        title={`${r.type}: ${r.home}${r.error ? `\n⚠ ${r.error}` : ''}`}
-                        onClick={() => toggleRuntime(r.name)}
-                      >
-                        {on && <CheckIcon size={12} />}
-                        {r.name}
-                      </button>
-                    )
-                  })}
-                  <button type="button" className="chip toggle chip-add" onClick={() => setNewRuntime(true)} title="Add a java / node / script installation">
-                    <PlusIcon size={12} />
-                    New runtime
-                  </button>
-                  {!spec.runtime?.length && <span className="muted small">none selected: java / mvn / node come from the system PATH</span>}
-                </div>
-                {spec.type === 'spring-boot' && javaWanted && (
-                  <em className={`small ${javaTooOld ? 'field-warn' : 'muted'}`}>
-                    pom.xml asks for Java {javaWanted}
-                    {javaPicked ? ` · using ${javaPicked.name}` : ' · using java from the system PATH'}
-                    {javaTooOld && ' (older than required, the build will likely fail)'}
-                  </em>
-                )}
-              </div>
-
-              {preview && (
-                <div className={`preview ${preview.error ? 'bad' : ''}`}>
-                  {preview.error ? (
-                    <div className="preview-row">
-                      <WarnIcon size={14} />
-                      <span>{preview.error}</span>
-                    </div>
-                  ) : (
-                    <>
-                      {preview.build && (
-                        <div className="preview-row">
-                          <span className="preview-tag build">
-                            <HammerIcon size={12} /> build
-                          </span>
-                          <code>{preview.build}</code>
-                        </div>
-                      )}
-                      <div className="preview-row">
-                        <span className="preview-tag run">
-                          <PlayIcon size={11} /> run
-                        </span>
-                        <code>{preview.run}</code>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
+              {preview && <CommandPreview preview={preview} />}
             </section>
 
-            <section className="form-section">
-              <h3>General</h3>
-              <div className="grid-2">
-                <label className="field">
-                  <span>Name *</span>
-                  <input ref={nameRef} value={spec.name} onChange={(e) => set('name', e.target.value)} placeholder="account-api" />
-                  {nameError && <em className="field-error">{nameError}</em>}
-                  {editing && active && spec.name !== editing && <em className="field-error">stop the service to rename it</em>}
-                </label>
-                <label className="field">
-                  <span>Group</span>
-                  <input list="pr-groups" value={spec.group} onChange={(e) => set('group', e.target.value)} placeholder="backend" />
-                  <datalist id="pr-groups">
-                    {groups.map((g) => (
-                      <option key={g} value={g} />
-                    ))}
-                  </datalist>
-                </label>
-              </div>
-              <label className="field">
-                <span>
-                  URL <span className="optional">optional</span>
-                </span>
-                <input value={spec.url} onChange={(e) => set('url', e.target.value)} placeholder="http://localhost:8080/swagger-ui.html" />
-                <em className="muted small">Shown as a link next to the service name.</em>
-              </label>
-            </section>
+            <GeneralSection spec={spec} set={set} nameRef={nameRef} nameError={nameError} editing={editing} active={active} groups={groups} />
 
-            <section className="form-section">
-              <h3>Environment</h3>
-              <div className="env-rows">
-                {env.map((e, i) => (
-                  <div className="env-row" key={i}>
-                    <input className="mono" value={e.key} placeholder="NAME" onChange={(ev) => setEnv(i, 'key', ev.target.value)} />
-                    <span className="muted">=</span>
-                    <input className="mono" value={e.value} placeholder="value  (may use ${OTHER})" onChange={(ev) => setEnv(i, 'value', ev.target.value)} />
-                    <button className="btn" title="Remove" onClick={() => set('env', env.filter((_, j) => j !== i))}>
-                      <CloseIcon size={14} />
-                    </button>
-                  </div>
-                ))}
-                <button className="btn text" onClick={() => set('env', [...env, { key: '', value: '' }])}>
-                  <PlusIcon size={14} />
-                  <span>Add variable</span>
-                </button>
-              </div>
-              <label className="field">
-                <span>Env file</span>
-                <input className="mono" value={spec.envFile} onChange={(e) => set('envFile', e.target.value)} placeholder=".env.local" />
-              </label>
-            </section>
+            <EnvSection spec={spec} set={set} />
 
-            <section className="form-section">
-              <h3>Startup</h3>
-              <div className="field">
-                <span>Ready when</span>
-                <div className="segmented">
-                  {(['none', 'port', 'log'] as ReadyMode[]).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      className={readyMode === m ? 'on' : ''}
-                      onClick={() => {
-                        touched.current.add('ready')
-                        setReadyMode(m)
-                      }}
-                    >
-                      {m === 'none' ? 'Immediately' : m === 'port' ? 'Port is open' : 'Log line matches'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {readyMode !== 'none' && (
-                <div className="grid-2">
-                  {readyMode === 'port' ? (
-                    <label className="field">
-                      <span>Port</span>
-                      <input type="number" value={spec.readyPort || ''} onChange={(e) => set('readyPort', Number(e.target.value))} placeholder="8080" />
-                    </label>
-                  ) : (
-                    <label className="field">
-                      <span>Log regex</span>
-                      <input className="mono" value={spec.readyLog} onChange={(e) => set('readyLog', e.target.value)} placeholder="Started .* in" />
-                    </label>
-                  )}
-                  <label className="field">
-                    <span>Timeout</span>
-                    <input value={spec.readyTimeout} onChange={(e) => set('readyTimeout', e.target.value)} placeholder="3m" />
-                  </label>
-                </div>
-              )}
-              {others.length > 0 && (
-                <div className="field">
-                  <span>Start after (depends on)</span>
-                  <div className="chips">
-                    {others.map((s) => {
-                      const on = spec.dependsOn?.includes(s.name)
-                      return (
-                        <button key={s.name} type="button" className={`chip toggle ${on ? 'on' : ''}`} onClick={() => toggleDep(s.name)}>
-                          {on && <CheckIcon size={12} />}
-                          {s.name}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-              <label className="check">
-                <input type="checkbox" checked={spec.autostart} onChange={(e) => set('autostart', e.target.checked)} />
-                <span>Start automatically when The Grid starts</span>
-              </label>
-              <label className="check" title="Services that share a working directory are one project in Changes: unticking this on any of them hides it">
-                <input type="checkbox" checked={!spec.noChanges} onChange={(e) => set('noChanges', !e.target.checked)} />
-                <span>Show this project in Changes</span>
-              </label>
-            </section>
+            <StartupSection
+              spec={spec}
+              set={set}
+              readyMode={readyMode}
+              setReadyMode={(m) => {
+                touched.current.add('ready')
+                setReadyMode(m)
+              }}
+              others={others}
+              toggleDep={toggleDep}
+            />
 
-            <details className="form-section">
-              <summary>
-                <h3>Advanced</h3>
-              </summary>
-              <div className="grid-3">
-                <label className="field">
-                  <span>Restart policy</span>
-                  <select value={spec.restart || 'no'} onChange={(e) => set('restart', e.target.value)}>
-                    <option value="no">Never</option>
-                    <option value="on-failure">On failure</option>
-                    <option value="always">Always</option>
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Max restarts</span>
-                  <input
-                    type="number"
-                    disabled={!spec.restart || spec.restart === 'no'}
-                    value={spec.maxRestarts || ''}
-                    onChange={(e) => set('maxRestarts', Number(e.target.value))}
-                    placeholder="5"
-                  />
-                </label>
-                <label className="field">
-                  <span>Log encoding</span>
-                  <select value={spec.encoding || 'auto'} onChange={(e) => set('encoding', e.target.value)}>
-                    <option value="auto">Auto (UTF-8, else cp1254)</option>
-                    <option value="utf-8">UTF-8</option>
-                    <option value="cp1254">cp1254 (Turkish Windows)</option>
-                  </select>
-                </label>
-              </div>
-              <label className="field narrow">
-                <span>Stop timeout</span>
-                <input value={spec.stopTimeout} onChange={(e) => set('stopTimeout', e.target.value)} placeholder="10s" />
-              </label>
-            </details>
+            <AdvancedSection spec={spec} set={set} />
           </div>
         )}
 
@@ -845,25 +430,5 @@ export function ServiceForm({ state, editing, initialGroup, initialCwd, onClose,
         <FolderPicker start="~" onClose={() => setPicker(false)} onPick={pickFolder} />
       )}
     </div>
-  )
-}
-
-function DetectLine({ det, path }: { det: DetectResult; path: string }) {
-  let text = 'No Maven or Node project found here'
-  if (det.spring?.modules.length) {
-    const n = det.spring.modules.length
-    text = `Spring Boot (Maven) · ${det.spring.artifactId}${det.spring.javaVersion ? ` · Java ${det.spring.javaVersion}` : ''}${n > 1 ? ` · ${n} apps` : ''}${det.spring.wrapper ? ' · mvnw' : ''}`
-  } else if (det.node) {
-    text = `Node · ${det.node.name || 'package.json'} · ${det.node.packageManager}${det.node.nodeVersion ? ` · node ${det.node.nodeVersion}` : ''}`
-  } else if (det.jars?.length) {
-    text = `${det.jars.length} jar file${det.jars.length > 1 ? 's' : ''}`
-  } else if (det.scripts?.length) {
-    text = `${det.scripts.length} script file${det.scripts.length > 1 ? 's' : ''}`
-  }
-  return (
-    <em className="field-ok" title={path}>
-      <CheckIcon size={12} />
-      {text}
-    </em>
   )
 }
