@@ -10,6 +10,7 @@ import { NeonBorder } from './NeonBorder'
 import { applyTheme, loadTheme, type Theme } from './theme'
 import { ChangesList, DiffPane, useGit } from './Changes'
 import { DbForm, DbSidebar, DbWorkbench, useDatabase } from './Database'
+import type { DbKind } from './dbApi'
 import { loadPrefs, TermPanel, type NewTermPrefs } from './Terminals'
 
 const ACTIVE = new Set(['starting', 'building', 'running', 'stopping'])
@@ -177,7 +178,14 @@ export default function App() {
     el.addEventListener('pointercancel', up)
   }
   const git = useGit(panel === 'changes')
-  const dbs = useDatabase(panel === 'database')
+  // The Database panel exists only in builds with -tags db.
+  const hasDb = state?.features?.includes('db') ?? false
+  // the database drivers compiled in (db:oracle, db:postgres)
+  const dbKinds = useMemo(() => (state?.features ?? []).filter((f) => f.startsWith('db:')).map((f) => f.slice(3) as DbKind), [state?.features])
+  const dbs = useDatabase(panel === 'database' && hasDb)
+  useEffect(() => {
+    if (state && !hasDb && panel === 'database') setPanel('services')
+  }, [state, hasDb, panel])
   const [terms, setTerms] = useState<TermInfo[]>([])
   const [selectedTerm, setSelectedTerm] = useState<string | null>(() => localStorage.getItem('grid.term'))
   const [termOpen, setTermOpen] = useState(() => localStorage.getItem('grid.term.open') === 'on')
@@ -499,15 +507,17 @@ export default function App() {
             <span className="activity-tip">Changes (git diff)</span>
             {git.total > 0 && <span className="activity-badge">{git.total}</span>}
           </button>
-          <button
-            className={`activity ${panel === 'database' ? 'on' : ''}`}
-            aria-label="Database"
-            onClick={() => setPanel('database')}
-          >
-            <DatabaseIcon size={22} />
-            <span className="activity-tip">Database</span>
-            {dbs.conns.some((c) => c.inTx) && <span className="activity-badge warn">!</span>}
-          </button>
+          {hasDb && (
+            <button
+              className={`activity ${panel === 'database' ? 'on' : ''}`}
+              aria-label="Database"
+              onClick={() => setPanel('database')}
+            >
+              <DatabaseIcon size={22} />
+              <span className="activity-tip">Database</span>
+              {dbs.conns.some((c) => c.inTx) && <span className="activity-badge warn">!</span>}
+            </button>
+          )}
           <button
             className={`activity ${panel === 'runtimes' ? 'on' : ''}`}
             aria-label="Runtimes"
@@ -974,7 +984,7 @@ export default function App() {
           }}
         />
       )}
-      {dbs.form && <DbForm editing={dbs.form.editing} onClose={dbs.closeForm} onSaved={dbs.saved} />}
+      {dbs.form && <DbForm editing={dbs.form.editing} kinds={dbKinds} onClose={dbs.closeForm} onSaved={dbs.saved} />}
       {rtForm && state && <RuntimeForm state={state} editing={rtForm.editing} onClose={() => setRtForm(null)} onDone={() => setRtForm(null)} />}
     </div>
   )

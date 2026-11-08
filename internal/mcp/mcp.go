@@ -128,7 +128,7 @@ func (s *Server) handle(req request, notify func(string, any)) (any, *rpcError) 
 			"protocolVersion": p.ProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "grid", "version": s.Version},
-			"instructions":    "Controls the services of The Grid. Use restart after changing a service's code, then read the log tail it returns (only what that start produced). To look into a problem use logs with level=error, grep or since_restart instead of reading many lines; describe tells where a service lives and how it runs. Databases the user shared are reachable with db_list, db_tables, db_describe and db_query (read-only; always describe a table before querying it). Builds can be slow: if restart says the service is still building or starting, that is NOT a failure; call wait (never restart again) until it is running.",
+			"instructions":    "Controls the services of The Grid. Use restart after changing a service's code, then read the log tail it returns (only what that start produced). To look into a problem use logs with level=error, grep or since_restart instead of reading many lines; describe tells where a service lives and how it runs." + dbInstructions + " Builds can be slow: if restart says the service is still building or starting, that is NOT a failure; call wait (never restart again) until it is running.",
 		}, nil
 	case "ping":
 		return map[string]any{}, nil
@@ -243,16 +243,6 @@ func (s *Server) call(name string, args map[string]any, progress func(string)) (
 	case "describe":
 		svc, _ := args["service"].(string)
 		return s.describe(svc)
-	case "db_list":
-		return s.dbList()
-	case "db_tables":
-		return s.dbTables(str(args, "connection"), str(args, "schema"), str(args, "search"))
-	case "db_describe":
-		return s.dbDescribe(str(args, "connection"), str(args, "schema"), str(args, "table"))
-	case "db_query":
-		return s.dbQuery(str(args, "connection"), str(args, "sql"), intArg(args, "max_rows", defaultDBRows, 1, maxDBRows), false)
-	case "db_execute":
-		return s.dbQuery(str(args, "connection"), str(args, "sql"), defaultDBRows, true)
 	case "restart":
 		svc, _ := args["service"].(string)
 		action, _ := args["action"].(string)
@@ -263,6 +253,9 @@ func (s *Server) call(name string, args map[string]any, progress func(string)) (
 	case "wait":
 		svc, _ := args["service"].(string)
 		return s.waitTool(svc, s.waitArg(args), progress)
+	}
+	if text, ok, err := s.callDB(name, args); ok {
+		return text, err
 	}
 	return "", fmt.Errorf("unknown tool %q", name)
 }

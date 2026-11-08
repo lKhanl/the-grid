@@ -1,3 +1,5 @@
+//go:build db || oracle || postgres
+
 // Package db is Grid's small database client: saved connections, an Oracle
 // driver (pure Go, no Oracle client needed), a SQL session with commit and
 // rollback, schema browsing, and the guarded access used by MCP.
@@ -22,7 +24,7 @@ const (
 	MCPReadWrite = "readwrite" // the AI may also run INSERT / UPDATE / DDL
 )
 
-// Connection modes.
+// Connection modes (Oracle).
 const (
 	ModeService = "service" // host + port + service name
 	ModeSID     = "sid"     // host + port + SID
@@ -33,14 +35,16 @@ const (
 // ~/.grid/connections.json (readable by this user only).
 type Conn struct {
 	Name       string `json:"name"`
-	Kind       string `json:"kind"` // oracle (postgres later)
-	Mode       string `json:"mode"`
+	Kind       string `json:"kind"`           // oracle | postgres
+	Mode       string `json:"mode,omitempty"` // Oracle: service | sid | tns
 	Host       string `json:"host,omitempty"`
 	Port       int    `json:"port,omitempty"`
 	Service    string `json:"service,omitempty"`
 	SID        string `json:"sid,omitempty"`
 	TNS        string `json:"tns,omitempty"`      // descriptor, or an alias looked up in tnsnames.ora
 	TNSAdmin   string `json:"tnsAdmin,omitempty"` // folder with tnsnames.ora (default: $TNS_ADMIN)
+	Database   string `json:"database,omitempty"` // Postgres: the database name
+	SSLMode    string `json:"sslMode,omitempty"`  // Postgres: disable | allow | prefer (default) | require | verify-ca | verify-full
 	User       string `json:"user"`
 	Password   string `json:"password,omitempty"`
 	AutoCommit bool   `json:"autoCommit"`
@@ -65,34 +69,16 @@ func (c *Conn) Normalize() error {
 		return errors.New("name: letters, digits, space, _ . - (1-64 characters, starting with a letter or digit)")
 	}
 	if c.Kind == "" {
-		c.Kind = "oracle"
+		c.Kind = defaultKind()
 	}
-	if c.Kind != "oracle" {
-		return fmt.Errorf("kind %q is not supported (oracle)", c.Kind)
-	}
-	if c.Mode == "" {
-		c.Mode = ModeService
+	d, err := dialectOf(c.Kind)
+	if err != nil {
+		return err
 	}
 	c.Host, c.Service, c.SID = strings.TrimSpace(c.Host), strings.TrimSpace(c.Service), strings.TrimSpace(c.SID)
 	c.TNS, c.TNSAdmin, c.User = strings.TrimSpace(c.TNS), strings.TrimSpace(c.TNSAdmin), strings.TrimSpace(c.User)
-	switch c.Mode {
-	case ModeService:
-		if c.Host == "" || c.Service == "" {
-			return errors.New("host and service name are required")
-		}
-	case ModeSID:
-		if c.Host == "" || c.SID == "" {
-			return errors.New("host and SID are required")
-		}
-	case ModeTNS:
-		if c.TNS == "" {
-			return errors.New("a TNS descriptor or alias is required")
-		}
-	default:
-		return fmt.Errorf("mode %q: use service, sid or tns", c.Mode)
-	}
-	if c.Mode != ModeTNS && c.Port == 0 {
-		c.Port = 1521
+	if err := d.normalize(c); err != nil {
+		return err
 	}
 	if c.User == "" {
 		return errors.New("user is required")
@@ -105,6 +91,19 @@ func (c *Conn) Normalize() error {
 		return fmt.Errorf("mcp %q: use off, readonly or readwrite", c.MCP)
 	}
 	return nil
+}
+
+// Where is the connection's address for display, e.g. "db:1521/ORCLPDB1" or "db:5432/orders".
+func (c Conn) Where() string {
+	switch {
+	case c.Kind == KindPostgres:
+		return fmt.Sprintf("%s:%d/%s", c.Host, c.Port, c.Database)
+	case c.Mode == ModeSID:
+		return fmt.Sprintf("%s:%d SID %s", c.Host, c.Port, c.SID)
+	case c.Mode == ModeTNS:
+		return "TNS " + c.TNS
+	}
+	return fmt.Sprintf("%s:%d/%s", c.Host, c.Port, c.Service)
 }
 
 // Store keeps the saved connections in one JSON file.

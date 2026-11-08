@@ -1,18 +1,30 @@
 import { check, HEADERS } from './api'
 
+export type DbKind = 'oracle' | 'postgres'
 export type DbMode = 'service' | 'sid' | 'tns'
+export type SslMode = 'disable' | 'allow' | 'prefer' | 'require' | 'verify-ca' | 'verify-full'
+
+/** An unquoted name as the database stores it: Oracle upper case, Postgres lower case. */
+export const foldName = (n: string, kind: DbKind) => (kind === 'postgres' ? n.toLowerCase() : n.toUpperCase())
+/** A name as it must be written in SQL: unusual ones (other case, spaces, ...) keep their quotes. */
+export const quoteName = (n: string, kind: DbKind) =>
+  (kind === 'postgres' ? /^[a-z_][a-z0-9_$]*$/ : /^[A-Z][A-Z0-9_$#]*$/).test(n) ? n : `"${n.replace(/"/g, '""')}"`
 export type McpAccess = 'off' | 'readonly' | 'readwrite'
 
 export interface DbConn {
   name: string
-  kind: 'oracle'
-  mode: DbMode
+  kind: DbKind
+  /** Oracle only */
+  mode?: DbMode
   host?: string
   port?: number
   service?: string
   sid?: string
   tns?: string
   tnsAdmin?: string
+  /** Postgres only */
+  database?: string
+  sslMode?: SslMode
   user: string
   password?: string
   autoCommit: boolean

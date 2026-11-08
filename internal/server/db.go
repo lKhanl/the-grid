@@ -1,3 +1,5 @@
+//go:build db || oracle || postgres
+
 package server
 
 import (
@@ -24,6 +26,11 @@ func dbError(w http.ResponseWriter, err error) {
 		code = http.StatusConflict
 	}
 	writeError(w, code, err.Error())
+}
+
+// DBRoutes is the database module for New.
+func DBRoutes(dbm *db.Manager) func(*http.ServeMux) {
+	return func(mux *http.ServeMux) { dbRoutes(mux, dbm) }
 }
 
 // dbRoutes serves the database panel (/api/db...) and the guarded AI access (/api/ai/db...).

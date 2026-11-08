@@ -1,3 +1,5 @@
+//go:build db || oracle || postgres
+
 package db
 
 import (
@@ -75,21 +77,35 @@ func (m *Manager) queryAll(ctx context.Context, name, q string, args []any, fn f
 	return rows.Err()
 }
 
+// dialectFor is the dialect of a saved connection.
+func (m *Manager) dialectFor(name string) (dialect, error) {
+	p, err := m.get(name)
+	if err != nil {
+		return nil, err
+	}
+	return p.d, nil
+}
+
 // CurrentSchema is the schema the connection's user works in.
 func (m *Manager) CurrentSchema(ctx context.Context, name string) (string, error) {
+	d, err := m.dialectFor(name)
+	if err != nil {
+		return "", err
+	}
 	var s string
-	err := m.queryAll(ctx, name, `SELECT sys_context('USERENV','CURRENT_SCHEMA') FROM dual`, nil, func(r *sql.Rows) error { return r.Scan(&s) })
+	err = m.queryAll(ctx, name, d.currentSchemaSQL(), nil, func(r *sql.Rows) error { return r.Scan(&s) })
 	return s, err
 }
 
-// Schemas lists the schemas that hold user objects (Oracle's own ones are left out unless all is set).
+// Schemas lists the schemas that hold user objects (the database's own ones are left out unless all is set).
 func (m *Manager) Schemas(ctx context.Context, name string, all bool) ([]string, error) {
-	q := `SELECT username FROM all_users WHERE oracle_maintained = 'N' ORDER BY username`
-	if all {
-		q = `SELECT username FROM all_users ORDER BY username`
+	d, err := m.dialectFor(name)
+	if err != nil {
+		return nil, err
 	}
+	q := d.schemasSQL(all)
 	out := []string{}
-	err := m.queryAll(ctx, name, q, nil, func(r *sql.Rows) error {
+	err = m.queryAll(ctx, name, q, nil, func(r *sql.Rows) error {
 		var s string
 		if err := r.Scan(&s); err != nil {
 			return err
@@ -115,6 +131,10 @@ func likePattern(q string) string {
 
 // Tables lists tables and views. schema "" means the user's current schema, "*" all user schemas.
 func (m *Manager) Tables(ctx context.Context, name, schema, search string, limit int) ([]TableRef, bool, error) {
+	d, err := m.dialectFor(name)
+	if err != nil {
+		return nil, false, err
+	}
 	if schema == "" {
 		s, err := m.CurrentSchema(ctx, name)
 		if err != nil {
@@ -122,20 +142,14 @@ func (m *Manager) Tables(ctx context.Context, name, schema, search string, limit
 		}
 		schema = s
 	}
-	where := `o.owner = :1`
 	args := []any{schema, likePattern(search)}
 	if schema == "*" {
-		where = `o.owner IN (SELECT username FROM all_users WHERE oracle_maintained = 'N')`
 		args = []any{likePattern(search)}
 	}
-	q := `SELECT o.owner, o.object_name, o.object_type, tc.comments
-	      FROM all_objects o LEFT JOIN all_tab_comments tc ON tc.owner = o.owner AND tc.table_name = o.object_name
-	      WHERE ` + where + ` AND o.object_type IN ('TABLE','VIEW','MATERIALIZED VIEW')
-	      AND o.object_name LIKE ` + map[bool]string{true: ":1", false: ":2"}[schema == "*"] + `
-	      ORDER BY o.owner, o.object_name`
+	q := d.tablesSQL(schema == "*")
 	var out []TableRef
 	truncated := false
-	err := m.queryAll(ctx, name, q, args, func(r *sql.Rows) error {
+	err = m.queryAll(ctx, name, q, args, func(r *sql.Rows) error {
 		if len(out) >= limit {
 			truncated = true
 			return nil
@@ -171,6 +185,10 @@ func typeName(dt string, charLen, prec, scale sql.NullInt64) string {
 
 // Describe returns columns, keys and indexes of one table or view.
 func (m *Manager) Describe(ctx context.Context, name, schema, table string) (*TableInfo, error) {
+	d, err := m.dialectFor(name)
+	if err != nil {
+		return nil, err
+	}
 	if schema == "" {
 		s, err := m.CurrentSchema(ctx, name)
 		if err != nil {
@@ -178,9 +196,9 @@ func (m *Manager) Describe(ctx context.Context, name, schema, table string) (*Ta
 		}
 		schema = s
 	}
-	info, err := m.describeExact(ctx, name, schema, table)
-	if err == nil && len(info.Columns) == 0 && table != strings.ToUpper(table) {
-		info, err = m.describeExact(ctx, name, schema, strings.ToUpper(table)) // unquoted names are upper case
+	info, err := m.describeExact(ctx, name, d.meta(), schema, table)
+	if f := d.foldName(table); err == nil && len(info.Columns) == 0 && table != f {
+		info, err = m.describeExact(ctx, name, d.meta(), schema, f) // unquoted names: upper case in Oracle, lower in Postgres
 	}
 	if err == nil && len(info.Columns) == 0 {
 		return nil, fmt.Errorf("table or view %s.%s not found (or no access)", schema, table)
@@ -188,13 +206,11 @@ func (m *Manager) Describe(ctx context.Context, name, schema, table string) (*Ta
 	return info, err
 }
 
-func (m *Manager) describeExact(ctx context.Context, name, schema, table string) (*TableInfo, error) {
+func (m *Manager) describeExact(ctx context.Context, name string, q metaSQL, schema, table string) (*TableInfo, error) {
 	info := &TableInfo{Schema: schema, Name: table, Columns: []ColumnInfo{}}
 	args := []any{schema, table}
 
-	err := m.queryAll(ctx, name, `SELECT o.object_type, tc.comments FROM all_objects o
-		LEFT JOIN all_tab_comments tc ON tc.owner = o.owner AND tc.table_name = o.object_name
-		WHERE o.owner = :1 AND o.object_name = :2 AND o.object_type IN ('TABLE','VIEW','MATERIALIZED VIEW') AND ROWNUM = 1`, args,
+	err := m.queryAll(ctx, name, q.object, args,
 		func(r *sql.Rows) error {
 			var c sql.NullString
 			if err := r.Scan(&info.Type, &c); err != nil {
@@ -207,10 +223,7 @@ func (m *Manager) describeExact(ctx context.Context, name, schema, table string)
 		return nil, err
 	}
 
-	err = m.queryAll(ctx, name, `SELECT c.column_name, c.data_type, c.char_length, c.data_precision, c.data_scale, c.nullable, cc.comments
-		FROM all_tab_columns c LEFT JOIN all_col_comments cc
-		  ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
-		WHERE c.owner = :1 AND c.table_name = :2 ORDER BY c.column_id`, args,
+	err = m.queryAll(ctx, name, q.columns, args,
 		func(r *sql.Rows) error {
 			var col ColumnInfo
 			var dt string
@@ -232,10 +245,7 @@ func (m *Manager) describeExact(ctx context.Context, name, schema, table string)
 	type keyKey struct{ name, typ string }
 	order := []keyKey{}
 	cols := map[keyKey][]string{}
-	err = m.queryAll(ctx, name, `SELECT ac.constraint_name, ac.constraint_type, acc.column_name
-		FROM all_constraints ac JOIN all_cons_columns acc ON acc.owner = ac.owner AND acc.constraint_name = ac.constraint_name
-		WHERE ac.owner = :1 AND ac.table_name = :2 AND ac.constraint_type IN ('P','U','R')
-		ORDER BY ac.constraint_name, acc.position`, args,
+	err = m.queryAll(ctx, name, q.keys, args,
 		func(r *sql.Rows) error {
 			var n, t, c string
 			if err := r.Scan(&n, &t, &c); err != nil {
@@ -254,12 +264,7 @@ func (m *Manager) describeExact(ctx context.Context, name, schema, table string)
 	refs := map[string]string{} // foreign key -> OWNER.TABLE(COLS)
 	refCols := map[string][]string{}
 	refTable := map[string]string{}
-	err = m.queryAll(ctx, name, `SELECT ac.constraint_name, rc.owner, rc.table_name, rcc.column_name
-		FROM all_constraints ac
-		JOIN all_constraints rc ON rc.owner = ac.r_owner AND rc.constraint_name = ac.r_constraint_name
-		JOIN all_cons_columns rcc ON rcc.owner = rc.owner AND rcc.constraint_name = rc.constraint_name
-		WHERE ac.owner = :1 AND ac.table_name = :2 AND ac.constraint_type = 'R'
-		ORDER BY ac.constraint_name, rcc.position`, args,
+	err = m.queryAll(ctx, name, q.fkRefs, args,
 		func(r *sql.Rows) error {
 			var n, o, t, c string
 			if err := r.Scan(&n, &o, &t, &c); err != nil {
@@ -296,9 +301,7 @@ func (m *Manager) describeExact(ctx context.Context, name, schema, table string)
 	// indexes
 	idx := map[string]*IndexInfo{}
 	var idxOrder []string
-	err = m.queryAll(ctx, name, `SELECT i.index_name, i.uniqueness, ic.column_name
-		FROM all_indexes i JOIN all_ind_columns ic ON ic.index_owner = i.owner AND ic.index_name = i.index_name
-		WHERE i.table_owner = :1 AND i.table_name = :2 ORDER BY i.index_name, ic.column_position`, args,
+	err = m.queryAll(ctx, name, q.indexes, args,
 		func(r *sql.Rows) error {
 			var n, u, c string
 			if err := r.Scan(&n, &u, &c); err != nil {

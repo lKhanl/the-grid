@@ -1,5 +1,5 @@
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete'
-import { dbDescribe, dbSchemas, dbTables, type TableInfo, type TableRef } from './dbApi'
+import { dbDescribe, dbSchemas, dbTables, foldName, quoteName, type DbKind, type TableInfo, type TableRef } from './dbApi'
 import { statementAt } from './sqlSplit'
 
 // Table, view, schema and column suggestions from the connected database, fetched on demand and
@@ -10,9 +10,7 @@ const NOT_ALIAS = new Set(['WHERE', 'ON', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUT
 const ID = '(?:"[^"]+"|[A-Za-z_][\\w$#]*)'
 const TABLE_REF = new RegExp(`^\\s*(${ID}(?:\\s*\\.\\s*${ID})?)(?:\\s+(?:AS\\s+)?(${ID}))?`, 'i')
 
-const unquote = (s: string) => (s.startsWith('"') ? s.slice(1, -1) : s.toUpperCase())
-// an unusual name (lower case, spaces, ...) must keep its quotes
-const insertName = (n: string) => (/^[A-Z][A-Z0-9_$#]*$/.test(n) ? n : `"${n}"`)
+const unquoter = (kind: DbKind) => (s: string) => (s.startsWith('"') ? s.slice(1, -1) : foldName(s, kind))
 
 interface Ref {
   schema: string // '' = the user's own schema
@@ -21,7 +19,8 @@ interface Ref {
 }
 
 /** The tables a statement reads from or writes to, with their aliases. */
-export function tablesOf(sqlText: string): Ref[] {
+export function tablesOf(sqlText: string, kind: DbKind = 'oracle'): Ref[] {
+  const unquote = unquoter(kind)
   const out: Ref[] = []
   const add = (part: string) => {
     if (part.trimStart().startsWith('(')) return // a sub-select
@@ -41,7 +40,9 @@ export function tablesOf(sqlText: string): Ref[] {
 /** `exclusive`: after `x.` or FROM only names make sense, so no keywords are mixed in. */
 export type NameResult = CompletionResult & { exclusive?: boolean }
 
-export function createCompletion(connection: string): (ctx: CompletionContext) => Promise<NameResult | null> {
+export function createCompletion(connection: string, kind: DbKind = 'oracle'): (ctx: CompletionContext) => Promise<NameResult | null> {
+  const unquote = unquoter(kind)
+  const insertName = (n: string) => quoteName(n, kind)
   const memo = new Map<string, { at: number; value: Promise<unknown> }>()
   const cached = <T>(key: string, load: () => Promise<T>): Promise<T> => {
     const hit = memo.get(key)
@@ -79,13 +80,13 @@ export function createCompletion(connection: string): (ctx: CompletionContext) =
     if (!m) return null
     if (m.from === m.to && !ctx.explicit) return null
     const text = ctx.state.doc.toString()
-    const stmt = statementAt(text, ctx.pos)?.sql ?? text
+    const stmt = statementAt(text, ctx.pos, kind)?.sql ?? text
     const dot = m.text.lastIndexOf('.')
     const tail = m.text.slice(dot + 1)
     const from = m.from + dot + 1 + (tail.length - tail.trimStart().length)
     const word = tail.trim()
     try {
-      const refs = tablesOf(stmt)
+      const refs = tablesOf(stmt, kind)
       if (dot >= 0) {
         const q = unquote(m.text.slice(0, dot).trim())
         const ref = refs.find((r) => r.alias === q) ?? refs.find((r) => r.table === q && !r.alias)

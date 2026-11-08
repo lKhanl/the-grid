@@ -1,3 +1,5 @@
+//go:build db || oracle || postgres
+
 package mcp
 
 import (
@@ -21,6 +23,28 @@ const (
 	defaultDBRows = 50
 	maxDBRows     = 500
 )
+
+// dbInstructions is appended to the server instructions.
+const dbInstructions = " Databases the user shared are reachable with db_list, db_tables, db_describe and db_query (read-only; always describe a table before querying it)."
+
+// callDB runs a database tool; ok is false when name is not one.
+func (s *Server) callDB(name string, args map[string]any) (text string, ok bool, err error) {
+	switch name {
+	case "db_list":
+		text, err = s.dbList()
+	case "db_tables":
+		text, err = s.dbTables(str(args, "connection"), str(args, "schema"), str(args, "search"))
+	case "db_describe":
+		text, err = s.dbDescribe(str(args, "connection"), str(args, "schema"), str(args, "table"))
+	case "db_query":
+		text, err = s.dbQuery(str(args, "connection"), str(args, "sql"), intArg(args, "max_rows", defaultDBRows, 1, maxDBRows), false)
+	case "db_execute":
+		text, err = s.dbQuery(str(args, "connection"), str(args, "sql"), defaultDBRows, true)
+	default:
+		return "", false, nil
+	}
+	return text, true, err
+}
 
 var dbTools = []map[string]any{
 	{
@@ -116,15 +140,9 @@ func (s *Server) dbList() (string, error) {
 	}
 	var out strings.Builder
 	for _, v := range list {
-		where := fmt.Sprintf("%s:%d/%s", v.Host, v.Port, v.Service)
-		switch v.Mode {
-		case db.ModeSID:
-			where = fmt.Sprintf("%s:%d SID %s", v.Host, v.Port, v.SID)
-		case db.ModeTNS:
-			where = "TNS " + v.TNS
-			if len(where) > 60 {
-				where = where[:60] + "..."
-			}
+		where := v.Where()
+		if len(where) > 60 { // a full TNS descriptor
+			where = where[:60] + "..."
 		}
 		access := "read-only"
 		if v.MCP == db.MCPReadWrite {

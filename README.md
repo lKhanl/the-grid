@@ -35,7 +35,7 @@ need 3–4 APIs, UIs and scripts running side by side with their logs one click 
 - Live colored logs (xterm.js), filter, 1k-10k lines per service (Settings → Logs, default 5k)
 - **Terminals** in the same window (``Ctrl+` ``): real shells (cmd, PowerShell, Git Bash, bash, zsh…) opened in the
   selected service's folder, several at once (Windows 10 1809+ for the pseudo-console)
-- **Database** panel: a small Oracle SQL client you can share with your AI agent over MCP (see below)
+- **Database** panel (optional module, `-tags db`): a small Oracle SQL client you can share with your AI agent over MCP (see below)
 - `depends_on` + readiness (`port` or log regex) so things start in order
 - Restart policies (`on-failure`, `always`)
 - Clean process-tree kill: Windows Job Objects / Unix process groups — no orphan
@@ -52,10 +52,23 @@ go build -o grid .               # Windows: go build -o grid.exe .
 ./grid -c grid.yaml              # opens http://localhost:7070
 ```
 
+The default build has no Database panel. Add it with a build tag:
+
+| tag | drivers | make |
+|---|---|---|
+| (none) | no Database panel | `make build` |
+| `-tags db` | Oracle and PostgreSQL | `make build DB=1` |
+| `-tags oracle` | Oracle only | `make build DB=oracle` |
+| `-tags postgres` | PostgreSQL only | `make build DB=postgres` |
+
+Leaving a driver out keeps it (and its network and crypto code) out of the binary entirely, which matters on locked-down
+machines where endpoint protection flags new executables. `go version -m grid` lists what went in.
+
 Grid remembers the workspaces you open in `~/.grid/state.json` (override with `$GRID_HOME`).
 Without `-c` it reopens the last one; switch workspaces from the name next to the logo.
 
-Prebuilt binaries (`grid.exe` for Windows x64, `grid-macos` for Apple silicon, with `SHA256SUMS.txt`) are on the
+Prebuilt binaries (`grid.exe` for Windows x64, `grid-macos` for Apple silicon, `grid-db.exe` / `grid-db-macos` with the
+Database panel, and `SHA256SUMS.txt`) are on the
 [Releases](../../releases) page. The UI is prebuilt in `web/dist` and Go deps are vendored, so building only needs
 Go — no npm or internet access.
 
@@ -122,17 +135,23 @@ Without MCP the same works through the CLI (`grid status`, `grid logs <svc> -n 1
 
 ## Database panel
 
-A small SQL client for Oracle (pure Go driver: no Oracle client to install, one exe is enough). It targets 19c;
-the automated tests use a fake driver and it was tried against Oracle 23ai.
+Optional module: only in builds with `-tags db`, `-tags oracle` or `-tags postgres` (see Quick start;
+`grid-db.exe` on the Releases page has both drivers). Without it the panel and the `db_*` MCP tools are not there;
+with one driver the connection form only offers that database.
 
-Open the **Database** panel (cylinder icon), add a connection (host + port + service name, or SID, or a TNS
-descriptor / alias from `tnsnames.ora`), test it, then browse schemas, tables and columns on the left and write SQL
+A small SQL client for **Oracle** and **PostgreSQL** (pure Go drivers, go-ora and pgx: no client to install, one
+exe is enough). Oracle targets 19c (tried against 23ai); PostgreSQL 10 or newer (tried against 17). The automated
+tests use a fake driver.
+
+Open the **Database** panel (cylinder icon), add a connection (Oracle: host + port + service name, or SID, or a TNS
+descriptor / alias from `tnsnames.ora`; PostgreSQL: host + port + database and the SSL mode), test it, then browse schemas, tables and columns on the left and write SQL
 on the right:
 
 - **Run:** `Ctrl+Enter` runs the selection, or everything; `Ctrl+Shift+Enter` only the statement under the cursor.
   `Stop` cancels a running statement.
 - **Several statements** (separated by `;`) run one after the other, each result in its own tab, stopping at the
-  first error. A PL/SQL block ends with a line holding only `/`.
+  first error. Oracle: a PL/SQL block ends with a line holding only `/`. PostgreSQL: `;` inside `$$ … $$` bodies is
+  part of the body.
 - **Completion:** tables, views, schemas and columns from the database as you type (`FROM emp…`, `e.` after an alias).
 - **Results:** a scrolling grid you can copy or download as CSV, paged with Prev / Next. The row limit
   (10–1000) is next to **Run**.
@@ -141,7 +160,9 @@ on the right:
   Tick "Commit every statement automatically" on the connection if you prefer that.
 - **Where connections live:** `~/.grid/connections.json`, per user, not in `grid.yaml`. Passwords are stored as
   plain text there (the file is readable by your user only).
-- **Only Oracle for now**; the code is split so PostgreSQL can be added later.
+- **PostgreSQL specifics:** DDL is transactional, so it waits for Commit like DML does. `BEGIN` / `END` typed in
+  the editor work too. A failed statement only undoes itself: each one runs behind a savepoint, so the transaction
+  is not left aborted. `VACUUM`, `CREATE DATABASE` and the like run outside the transaction.
 
 ### Sharing a database with AI (MCP)
 
@@ -258,5 +279,5 @@ make build   # local binary in bin/ (build web/dist first when the UI changed)
 make web     # rebuild web/dist (commit it)
 make vendor  # after changing Go deps (commit vendor/)
 make windows # cross-compile bin/grid.exe
-go test ./...  # backend tests (the Database tests use a fake driver, no Oracle needed)
+make test     # Go tests of both builds (the Database tests use a fake driver, no Oracle needed)
 ```

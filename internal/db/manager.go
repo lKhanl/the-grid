@@ -1,3 +1,5 @@
+//go:build db || oracle || postgres
+
 package db
 
 import (
@@ -52,6 +54,7 @@ type session struct {
 type pool struct {
 	db   *sql.DB
 	conn Conn
+	d    dialect
 	sess session
 	cmu  sync.Mutex // guards sess.cancel
 }
@@ -70,21 +73,7 @@ type Manager struct {
 }
 
 func NewManager(store *Store) *Manager {
-	return &Manager{Store: store, Open: openOracle, AITimeout: 30 * time.Second, pools: map[string]*pool{}}
-}
-
-func openOracle(c Conn) (*sql.DB, error) {
-	url, err := dsn(c)
-	if err != nil {
-		return nil, err
-	}
-	d, err := sql.Open("oracle", url)
-	if err != nil {
-		return nil, err
-	}
-	d.SetMaxOpenConns(8) // stopped statements keep their connection until the database ends them
-	d.SetConnMaxIdleTime(5 * time.Minute)
-	return d, nil
+	return &Manager{Store: store, Open: openConn, AITimeout: 30 * time.Second, pools: map[string]*pool{}}
 }
 
 func key(name string) string { return strings.ToLower(name) }
@@ -101,11 +90,15 @@ func (m *Manager) get(name string) (*pool, error) {
 		p.conn.MCP = c.MCP // keep the access level current without reconnecting
 		return p, nil
 	}
+	dl, err := dialectOf(c.Kind)
+	if err != nil {
+		return nil, err
+	}
 	d, err := m.Open(c)
 	if err != nil {
 		return nil, err
 	}
-	p := &pool{db: d, conn: c}
+	p := &pool{db: d, conn: c, d: dl}
 	m.pools[key(name)] = p
 	return p, nil
 }
@@ -209,16 +202,11 @@ func (m *Manager) Test(ctx context.Context, c Conn, existing string) (string, er
 	if err := d.PingContext(ctx); err != nil {
 		return "", err
 	}
-	var who, version string
-	if err := d.QueryRowContext(ctx, `SELECT sys_context('USERENV','SESSION_USER') FROM dual`).Scan(&who); err != nil {
+	dl, err := dialectOf(c.Kind)
+	if err != nil {
 		return "", err
 	}
-	d.QueryRowContext(ctx, `SELECT version FROM product_component_version WHERE ROWNUM = 1`).Scan(&version) // best effort
-	msg := "Connected as " + who
-	if version != "" {
-		msg += " (Oracle " + version + ")"
-	}
-	return msg, nil
+	return dl.hello(ctx, d)
 }
 
 type runner interface {
@@ -255,12 +243,28 @@ func (m *Manager) Run(ctx context.Context, name, text string, maxRows, offset in
 		}
 		p.sess.conn = c
 	}
-	text = prepare(text)
+	d := p.d
+	text = d.prepare(text)
 	if text == "" {
 		return nil, errors.New("empty statement")
 	}
 	start := time.Now()
-	if ctl := txControl(text); ctl != "" { // COMMIT / ROLLBACK typed in the editor
+	if ctl := d.txControl(text); strings.HasPrefix(ctl, "BEGIN") { // Postgres: BEGIN typed in the editor
+		if p.sess.tx == nil {
+			if err := p.beginTx(); err != nil {
+				p.resetIfBroken(err)
+				return nil, err
+			}
+			if opts := strings.TrimSpace(strings.TrimPrefix(ctl, "BEGIN")); opts != "" { // BEGIN ISOLATION LEVEL ...
+				if _, err := p.sess.tx.ExecContext(ctx, "SET TRANSACTION "+opts); err != nil {
+					p.sess.tx.Rollback()
+					p.sess.endTx()
+					return nil, err
+				}
+			}
+		}
+		return &Result{Kind: "update", Millis: time.Since(start).Milliseconds(), InTx: true}, nil
+	} else if ctl != "" { // COMMIT / ROLLBACK typed in the editor
 		if tx := p.sess.tx; tx != nil {
 			defer p.sess.endTx()
 			var err error
@@ -279,18 +283,22 @@ func (m *Manager) Run(ctx context.Context, name, text string, maxRows, offset in
 	if p.sess.tx != nil {
 		r = p.sess.tx
 	}
-	if !isQuery(text) && !p.conn.AutoCommit && p.sess.tx == nil {
-		txCtx, txCancel := context.WithCancel(context.Background())
-		tx, terr := p.sess.conn.BeginTx(txCtx, nil)
-		if terr != nil {
-			txCancel()
-			p.resetIfBroken(terr)
-			return nil, terr
+	rows := d.returnsRows(text)
+	if !d.isRead(text) && !d.noTx(text) && !p.conn.AutoCommit && p.sess.tx == nil {
+		if err := p.beginTx(); err != nil {
+			p.resetIfBroken(err)
+			return nil, err
 		}
-		p.sess.tx, p.sess.txCancel = tx, txCancel
-		r = tx
+		r = p.sess.tx
 	}
 	hadTx := p.sess.tx != nil
+	savepoint := hadTx && d.stmtSavepoint(text)
+	if savepoint {
+		if _, err := p.sess.tx.ExecContext(ctx, "SAVEPOINT grid_stmt"); err != nil {
+			p.resetIfBroken(err)
+			return nil, err
+		}
+	}
 
 	// The statement runs in its own goroutine so that Stop and the timeout answer at once even
 	// when the driver cannot interrupt the server (go-ora cannot on Windows: the break only
@@ -298,8 +306,8 @@ func (m *Manager) Run(ctx context.Context, name, text string, maxRows, offset in
 	done := make(chan outcome, 1)
 	go func() {
 		var o outcome
-		if isQuery(text) {
-			o.res, o.err = query(ctx, r, text, maxRows, offset)
+		if rows {
+			o.res, o.err = query(ctx, d, r, text, maxRows, offset)
 		} else {
 			o.res, o.err = exec(ctx, r, text)
 		}
@@ -325,6 +333,13 @@ func (m *Manager) Run(ctx context.Context, name, text string, maxRows, offset in
 	}
 	res, err := o.res, o.err
 	if err != nil {
+		if savepoint && p.sess.tx != nil && ctx.Err() == nil {
+			// undo only this statement; the transaction stays usable (Postgres would refuse
+			// everything until a rollback otherwise)
+			if _, rerr := p.sess.tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT grid_stmt"); rerr != nil {
+				p.resetIfBroken(rerr)
+			}
+		}
 		p.resetIfBroken(err)
 		lost := ""
 		if hadTx && p.sess.tx == nil {
@@ -338,13 +353,29 @@ func (m *Manager) Run(ctx context.Context, name, text string, maxRows, offset in
 		}
 		return nil, err
 	}
-	if isDDL(text) && p.sess.tx != nil { // Oracle committed everything with the DDL
+	if savepoint && p.sess.tx != nil {
+		p.sess.tx.ExecContext(ctx, "RELEASE SAVEPOINT grid_stmt")
+	}
+	if d.implicitCommit(text) && p.sess.tx != nil { // Oracle committed everything with the DDL
 		p.sess.tx.Commit()
 		p.sess.endTx()
 	}
 	res.Millis = time.Since(start).Milliseconds()
 	res.InTx = p.sess.tx != nil
 	return res, nil
+}
+
+// beginTx opens the UI transaction. database/sql rolls a transaction back when its context
+// ends, so it gets its own long-lived one. Caller holds sess.mu.
+func (p *pool) beginTx() error {
+	txCtx, txCancel := context.WithCancel(context.Background())
+	tx, err := p.sess.conn.BeginTx(txCtx, nil)
+	if err != nil {
+		txCancel()
+		return err
+	}
+	p.sess.tx, p.sess.txCancel = tx, txCancel
+	return nil
 }
 
 // abandon gives up on a statement that is still running: the session is detached (so the next
@@ -417,13 +448,13 @@ func (m *Manager) Disconnect(name string) {
 	m.Forget(name)
 }
 
-func query(ctx context.Context, r runner, text string, maxRows, offset int) (*Result, error) {
+func query(ctx context.Context, d dialect, r runner, text string, maxRows, offset int) (*Result, error) {
 	rows, err := r.QueryContext(ctx, text)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return readRows(rows, maxRows, offset)
+	return readRows(rows, d, maxRows, offset)
 }
 
 func exec(ctx context.Context, r runner, text string) (*Result, error) {
@@ -435,7 +466,7 @@ func exec(ctx context.Context, r runner, text string) (*Result, error) {
 	return &Result{Kind: "update", RowsAffected: n}, nil
 }
 
-func readRows(rows *sql.Rows, maxRows, offset int) (*Result, error) {
+func readRows(rows *sql.Rows, d dialect, maxRows, offset int) (*Result, error) {
 	cols, err := rows.Columns()
 	if err != nil {
 		return nil, err
@@ -473,7 +504,7 @@ func readRows(rows *sql.Rows, maxRows, offset int) (*Result, error) {
 			if i < len(out.Columns) {
 				t = out.Columns[i].Type
 			}
-			row[i] = formatCell(v, t)
+			row[i] = d.formatCell(v, t)
 		}
 		out.Rows = append(out.Rows, row)
 	}
@@ -499,12 +530,12 @@ func (m *Manager) AIQuery(ctx context.Context, name, text string, maxRows int, w
 			return nil, fmt.Errorf("connection %q is read-only for AI (set its MCP access to read & write to change data)", name)
 		}
 	}
-	text = prepare(text)
+	text = p.d.prepare(text)
 	// refuse before touching the database
 	if write {
-		err = checkSingle(text)
+		err = p.d.checkSingle(text)
 	} else {
-		err = checkReadOnly(text)
+		err = p.d.checkReadOnly(text)
 	}
 	if err != nil {
 		return nil, err
@@ -548,7 +579,7 @@ func (m *Manager) aiRun(ctx context.Context, p *pool, text string, maxRows int, 
 		if _, err := tx.ExecContext(ctx, "SET TRANSACTION READ ONLY"); err != nil {
 			return nil, fmt.Errorf("cannot start a read-only transaction: %w", err)
 		}
-		res, err := query(ctx, tx, text, maxRows, 0)
+		res, err := query(ctx, p.d, tx, text, maxRows, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -556,14 +587,22 @@ func (m *Manager) aiRun(ctx context.Context, p *pool, text string, maxRows int, 
 		return res, nil
 	}
 
+	if p.d.noTx(text) { // e.g. VACUUM: cannot run in a transaction
+		res, err := exec(ctx, conn, text)
+		if err != nil {
+			return nil, err
+		}
+		res.Millis = time.Since(start).Milliseconds()
+		return res, nil
+	}
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 	var res *Result
-	if isQuery(text) {
-		res, err = query(ctx, tx, text, maxRows, 0)
+	if p.d.returnsRows(text) {
+		res, err = query(ctx, p.d, tx, text, maxRows, 0)
 	} else {
 		res, err = exec(ctx, tx, text)
 	}

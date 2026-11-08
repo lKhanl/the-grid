@@ -3,9 +3,10 @@ import { Annotation, EditorState, Transaction } from '@codemirror/state'
 import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, placeholder } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { bracketMatching, HighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/language'
-import { PLSQL, sql } from '@codemirror/lang-sql'
+import { PLSQL, PostgreSQL, sql } from '@codemirror/lang-sql'
 import { autocompletion, type CompletionContext, type CompletionResult, type CompletionSource } from '@codemirror/autocomplete'
 import { createCompletion } from './sqlComplete'
+import type { DbKind } from './dbApi'
 import { statementAt } from './sqlSplit'
 import { tags as t } from '@lezer/highlight'
 
@@ -27,6 +28,8 @@ interface Props {
   placeholderText: string
   /** the connection, for table and column suggestions */
   connection: string
+  /** the database kind: SQL dialect, statement splitting and name case */
+  kind: DbKind
 }
 
 // Colours come from CSS variables (--sql-*), so both Grid themes style the editor.
@@ -68,12 +71,12 @@ const theme = EditorView.theme(
 // text that is put into the editor from outside (a SELECT from the tree) is marked, and is no undo step
 const external = Annotation.define<boolean>()
 
-export function SqlEditor({ value, rev, onChange, onRun, handle, placeholderText, connection }: Props) {
+export function SqlEditor({ value, rev, onChange, onRun, handle, placeholderText, connection, kind }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const cb = useRef({ onChange, onRun })
   cb.current = { onChange, onRun }
-  const complete = useRef(createCompletion(connection))
+  const complete = useRef(createCompletion(connection, kind))
   // database names first; keywords (the language's own source) are added unless only names make sense
   const names: CompletionSource = async (ctx: CompletionContext) => {
     const mine = await complete.current(ctx)
@@ -95,7 +98,7 @@ export function SqlEditor({ value, rev, onChange, onRun, handle, placeholderText
       const s = view.current!.state
       const sel = s.sliceDoc(s.selection.main.from, s.selection.main.to)
       if (sel.trim()) return sel
-      return statementAt(s.doc.toString(), s.selection.main.head)?.sql ?? ''
+      return statementAt(s.doc.toString(), s.selection.main.head, kind)?.sql ?? ''
     }
     const v = new EditorView({
       parent: host.current!,
@@ -109,7 +112,7 @@ export function SqlEditor({ value, rev, onChange, onRun, handle, placeholderText
           history(),
           bracketMatching(),
           indentUnit.of('  '),
-          sql({ dialect: PLSQL, upperCaseKeywords: true }),
+          sql({ dialect: kind === 'postgres' ? PostgreSQL : PLSQL, upperCaseKeywords: true }),
           autocompletion({ override: [names] }),
           syntaxHighlighting(highlight),
           placeholder(placeholderText),

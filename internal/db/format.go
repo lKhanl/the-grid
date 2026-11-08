@@ -1,3 +1,5 @@
+//go:build db || oracle || postgres
+
 package db
 
 import (

@@ -1,3 +1,5 @@
+//go:build db || oracle
+
 package server
 
 import (
@@ -18,7 +20,7 @@ import (
 func dbServer(t *testing.T) *httptest.Server {
 	dbm := db.NewManager(db.OpenStore(t.TempDir()))
 	t.Cleanup(dbm.Close)
-	h := New(runner.NewManager(config.Empty()), term.NewManager(func() {}), nil, dbm, fstest.MapFS{"index.html": {Data: []byte("x")}})
+	h := New(runner.NewManager(config.Empty()), term.NewManager(func() {}), nil, fstest.MapFS{"index.html": {Data: []byte("x")}}, DBRoutes(dbm))
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return srv

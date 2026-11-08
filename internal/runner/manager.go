@@ -17,6 +17,9 @@ import (
 // Version is the app version shown in the UI (set by main).
 var Version = "dev"
 
+// Features lists the optional modules compiled into this binary (e.g. "db").
+var Features []string
+
 // State is a snapshot of everything the UI needs.
 // LogLineOptions are the log history sizes the user can pick (lines per service).
 var LogLineOptions = []int{1000, 2500, 5000, 10000}
@@ -42,6 +45,7 @@ type State struct {
 	LogOptions []int         `json:"logLineOptions"` // sizes the UI offers
 	Runtimes   []RuntimeInfo `json:"runtimes"`
 	Services   []Info        `json:"services"`
+	Features   []string      `json:"features"` // optional modules in this build, e.g. "db"
 }
 
 type RuntimeInfo struct {
@@ -127,7 +131,7 @@ func (m *Manager) State() State {
 	m.mu.RLock()
 	cfg := m.cfg
 	m.mu.RUnlock()
-	st := State{Version: Version, Name: cfg.Name, ConfigPath: cfg.Path, LogLines: m.LogLines(), LogOptions: LogLineOptions, Services: []Info{}, Runtimes: []RuntimeInfo{}}
+	st := State{Version: Version, Name: cfg.Name, ConfigPath: cfg.Path, LogLines: m.LogLines(), LogOptions: LogLineOptions, Services: []Info{}, Runtimes: []RuntimeInfo{}, Features: append([]string{}, Features...)}
 	for _, name := range cfg.RuntimeOrder {
 		rt := cfg.Runtimes[name]
 		ri := RuntimeInfo{Name: name, Type: rt.Type, Home: rt.Home}

@@ -40,6 +40,8 @@ export interface State {
   logLineOptions: number[]
   runtimes: RuntimeInfo[]
   services: Info[]
+  /** optional modules compiled into this build, e.g. "db" (go build -tags db) */
+  features: string[]
 }
 
 export interface Entry {

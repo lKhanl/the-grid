@@ -1,3 +1,5 @@
+//go:build db || oracle || postgres
+
 package db
 
 import (
@@ -151,4 +153,86 @@ func checkSingle(sql string) error {
 		return errors.New("one statement at a time (no ; in the middle)")
 	}
 	return nil
+}
+
+// maskPG is maskLiterals for PostgreSQL: also $tag$ ... $tag$ bodies, E'...' strings with
+// backslash escapes and nested /* */ comments. The result has the same length as sql.
+func maskPG(sql string) string {
+	b := []byte(sql)
+	n := len(b)
+	blank := func(from, to int) {
+		for i := from; i < to && i < n; i++ {
+			if b[i] != '\n' {
+				b[i] = ' '
+			}
+		}
+	}
+	ident := func(c byte) bool {
+		return c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c >= 0x80
+	}
+	for i := 0; i < n; {
+		switch {
+		case b[i] == '-' && i+1 < n && b[i+1] == '-':
+			j := i
+			for j < n && b[j] != '\n' {
+				j++
+			}
+			blank(i, j)
+			i = j
+		case b[i] == '/' && i+1 < n && b[i+1] == '*':
+			depth, j := 1, i+2
+			for j < n && depth > 0 {
+				if b[j] == '/' && j+1 < n && b[j+1] == '*' {
+					depth, j = depth+1, j+2
+				} else if b[j] == '*' && j+1 < n && b[j+1] == '/' {
+					depth, j = depth-1, j+2
+				} else {
+					j++
+				}
+			}
+			blank(i, j)
+			i = j
+		case b[i] == '$' && (i == 0 || !ident(b[i-1]) && b[i-1] != '$'):
+			// $$ or $tag$ (a tag does not start with a digit: $1 is a parameter)
+			j := i + 1
+			for j < n && ident(b[j]) && !(j == i+1 && b[j] >= '0' && b[j] <= '9') {
+				j++
+			}
+			if j >= n || b[j] != '$' {
+				i++
+				continue
+			}
+			tag := string(b[i : j+1])
+			end := strings.Index(string(b[j+1:]), tag)
+			stop := n
+			if end >= 0 {
+				stop = j + 1 + end
+			}
+			blank(j+1, stop)
+			i = min(stop+len(tag), n)
+		case b[i] == '\'' || b[i] == '"':
+			q := b[i]
+			esc := q == '\'' && i > 0 && (b[i-1] == 'E' || b[i-1] == 'e') && (i == 1 || !ident(b[i-2]))
+			j := i + 1
+			for j < n {
+				if esc && b[j] == '\\' {
+					j += 2
+					continue
+				}
+				if b[j] == q {
+					if j+1 < n && b[j+1] == q {
+						j += 2
+						continue
+					}
+					break
+				}
+				j++
+			}
+			blank(i+1, j)
+			i = min(j+1, n)
+		default:
+			i++
+		}
+	}
+	return string(b)
 }

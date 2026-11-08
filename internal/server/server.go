@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/lKhanl/the-grid/internal/config"
-	"github.com/lKhanl/the-grid/internal/db"
 	"github.com/lKhanl/the-grid/internal/detect"
 	"github.com/lKhanl/the-grid/internal/runner"
 	"github.com/lKhanl/the-grid/internal/state"
@@ -29,11 +28,15 @@ func isActive(s runner.Status) bool {
 // answer), so random web pages cannot start/stop services.
 const CSRFHeader = "X-Grid"
 
-func New(m *runner.Manager, terms *term.Manager, store *state.Store, dbm *db.Manager, ui fs.FS) http.Handler {
+// New builds the HTTP handler. mods register the routes of optional modules
+// (the database panel, only in builds with -tags db).
+func New(m *runner.Manager, terms *term.Manager, store *state.Store, ui fs.FS, mods ...func(*http.ServeMux)) http.Handler {
 	mux := http.NewServeMux()
 	workspaceRoutes(mux, m, store)
 	termRoutes(mux, m, terms)
-	dbRoutes(mux, dbm)
+	for _, mod := range mods {
+		mod(mux)
+	}
 	gitRoutes(mux, m)
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, m.State())

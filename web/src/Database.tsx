@@ -13,11 +13,14 @@ import {
   dbSchemas,
   dbTables,
   dbTest,
+  quoteName,
   type DbConn,
+  type DbKind,
   type DbMode,
   type DbResult,
   type DbView,
   type McpAccess,
+  type SslMode,
   type TableInfo,
   type TableRef,
 } from './dbApi'
@@ -143,7 +146,7 @@ export function useDatabase(active: boolean): DbState {
   const connected = (n: string, result?: DbResult) => setConns((list) => list.map((c) => (c.name === n ? { ...c, connected: true, inTx: result ? result.inTx : c.inTx } : c)))
   // Runs every statement of the text one after the other (stopping at the first error); each gets a tab.
   const exec = async (text: string) => {
-    const stmts = splitSql(text)
+    const stmts = splitSql(text, current?.kind)
     if (!name || !stmts.length || runs[name]?.running) return
     const n = name
     const tabs: Tab[] = []
@@ -260,9 +263,12 @@ function useDebounced<T>(value: T, ms: number): T {
   return v
 }
 
-const where = (c: DbConn) => (c.mode === 'tns' ? `TNS ${c.tns?.startsWith('(') ? '(…)' : c.tns}` : `${c.host}:${c.port}${c.mode === 'sid' ? ` SID ${c.sid}` : `/${c.service}`}`)
-
-const quoteName = (n: string) => (/^[A-Z][A-Z0-9_$#]*$/.test(n) ? n : `"${n.replace(/"/g, '""')}"`)
+const where = (c: DbConn) =>
+  c.kind === 'postgres'
+    ? `${c.host}:${c.port}/${c.database}`
+    : c.mode === 'tns'
+      ? `TNS ${c.tns?.startsWith('(') ? '(…)' : c.tns}`
+      : `${c.host}:${c.port}${c.mode === 'sid' ? ` SID ${c.sid}` : `/${c.service}`}`
 
 // ---- sidebar: connections and the schema tree ----
 
@@ -418,7 +424,7 @@ function SchemaTree({ dbs, conn }: { dbs: DbState; conn: DbView }) {
               className="db-table"
               title={`${t.type.toLowerCase()}${t.comment ? ` — ${t.comment}` : ''}\nClick: columns · Double-click: SELECT *`}
               onClick={() => toggle(t)}
-              onDoubleClick={() => dbs.insertSql(`SELECT * FROM ${quoteName(t.schema)}.${quoteName(t.name)};`)}
+              onDoubleClick={() => dbs.insertSql(`SELECT * FROM ${quoteName(t.schema, conn.kind)}.${quoteName(t.name, conn.kind)};`)}
             >
               {info ? <ChevronDownIcon size={13} /> : <ChevronIcon size={13} />}
               <span className="name">{t.name}</span>
@@ -569,14 +575,15 @@ export function DbWorkbench({ dbs }: { dbs: DbState }) {
       )}
       <Suspense fallback={<div className="sql-editor" />}>
       <SqlEditor
-        key={c.name} /* another connection: a fresh editor with its own text and undo history */
+        key={`${c.name}|${c.kind}`} /* another connection: a fresh editor with its own text and undo history */
         value={dbs.sql}
         rev={dbs.sqlRev}
         onChange={dbs.setSql}
         onRun={dbs.exec}
         handle={editor}
         connection={c.name}
-        placeholderText={'SELECT * FROM dual\n\nCtrl+Enter runs the selection (or everything), Ctrl+Shift+Enter the statement under the cursor. Double-click a table on the left to write a SELECT.'}
+        kind={c.kind}
+        placeholderText={(c.kind === 'postgres' ? 'SELECT now()' : 'SELECT * FROM dual') + '\n\nCtrl+Enter runs the selection (or everything), Ctrl+Shift+Enter the statement under the cursor. Double-click a table on the left to write a SELECT.'}
       />
       </Suspense>
       {!dbs.run.hidden && (
@@ -784,14 +791,42 @@ function download(name: string, text: string) {
 
 // ---- connection form ----
 
-const blank = (): DbConn => ({ name: '', kind: 'oracle', mode: 'service', host: '', port: 1521, service: '', user: '', password: '', autoCommit: false, mcp: 'readonly' })
+const blank = (kind: DbKind): DbConn =>
+  kind === 'postgres'
+    ? { name: '', kind, host: '', port: 5432, database: '', sslMode: 'prefer', user: '', password: '', autoCommit: false, mcp: 'readonly' }
+    : { name: '', kind, mode: 'service', host: '', port: 1521, service: '', user: '', password: '', autoCommit: false, mcp: 'readonly' }
+const KIND_LABEL: Record<DbKind, string> = { oracle: 'Oracle', postgres: 'PostgreSQL' }
+const DEFAULT_PORT: Record<DbKind, number> = { oracle: 1521, postgres: 5432 }
 
-export function DbForm({ editing, onClose, onSaved }: { editing: DbView | null; onClose: () => void; onSaved: (v: DbView, old: string | null) => void }) {
-  const [c, setC] = useState<DbConn>(() => (editing ? { ...editing, password: '' } : blank()))
+export function DbForm({
+  editing,
+  kinds,
+  onClose,
+  onSaved,
+}: {
+  editing: DbView | null
+  /** the drivers in this build; empty = an older server, assume both */
+  kinds: DbKind[]
+  onClose: () => void
+  onSaved: (v: DbView, old: string | null) => void
+}) {
+  const offered: DbKind[] = kinds.length ? kinds : ['oracle', 'postgres']
+  const [c, setC] = useState<DbConn>(() => (editing ? { ...editing, password: '' } : blank(offered[0])))
+  const missing = !offered.includes(c.kind) // a saved connection whose driver this build lacks
   const [error, setError] = useState<string | null>(null)
   const [test, setTest] = useState<{ ok: boolean; text: string } | 'running' | null>(null)
   const [saving, setSaving] = useState(false)
   const set = <K extends keyof DbConn>(k: K, v: DbConn[K]) => setC((cur) => ({ ...cur, [k]: v }))
+  // another kind: its own defaults, and the port follows unless it was changed by hand
+  const setKind = (kind: DbKind) =>
+    setC((cur) => ({
+      ...cur,
+      kind,
+      port: !cur.port || cur.port === DEFAULT_PORT[cur.kind] ? DEFAULT_PORT[kind] : cur.port,
+      mode: kind === 'oracle' ? (cur.mode ?? 'service') : undefined,
+      sslMode: kind === 'postgres' ? (cur.sslMode ?? 'prefer') : undefined,
+    }))
+  const pg = c.kind === 'postgres'
 
   const doTest = () => {
     setTest('running')
@@ -834,15 +869,30 @@ export function DbForm({ editing, onClose, onSaved }: { editing: DbView | null; 
             <span>Name</span>
             <input value={c.name} onChange={(e) => set('name', e.target.value)} placeholder="orders-dev" autoFocus spellCheck={false} />
           </label>
-          <label className="field">
-            <span>Connect with</span>
-            <select value={c.mode} onChange={(e) => set('mode', e.target.value as DbMode)}>
-              <option value="service">Host, port and service name</option>
-              <option value="sid">Host, port and SID</option>
-              <option value="tns">TNS descriptor or alias</option>
-            </select>
-          </label>
-          {c.mode !== 'tns' ? (
+          {(offered.length > 1 || missing) && (
+            <label className="field">
+              <span>Database</span>
+              <select value={c.kind} onChange={(e) => setKind(e.target.value as DbKind)}>
+                {[...offered, ...(missing ? [c.kind] : [])].map((k) => (
+                  <option key={k} value={k} disabled={!offered.includes(k)}>
+                    {KIND_LABEL[k]}
+                    {offered.includes(k) ? '' : ' (not in this build)'}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {!pg && (
+            <label className="field">
+              <span>Connect with</span>
+              <select value={c.mode} onChange={(e) => set('mode', e.target.value as DbMode)}>
+                <option value="service">Host, port and service name</option>
+                <option value="sid">Host, port and SID</option>
+                <option value="tns">TNS descriptor or alias</option>
+              </select>
+            </label>
+          )}
+          {pg || c.mode !== 'tns' ? (
             <div className="grid-2">
               <label className="field">
                 <span>Host</span>
@@ -850,23 +900,42 @@ export function DbForm({ editing, onClose, onSaved }: { editing: DbView | null; 
               </label>
               <label className="field narrow">
                 <span>Port</span>
-                <input type="number" value={c.port ?? 1521} onChange={(e) => set('port', Number(e.target.value))} />
+                <input type="number" value={c.port ?? DEFAULT_PORT[c.kind]} onChange={(e) => set('port', Number(e.target.value))} />
               </label>
             </div>
           ) : null}
-          {c.mode === 'service' && (
+          {pg && (
+            <div className="grid-2">
+              <label className="field">
+                <span>Database name</span>
+                <input value={c.database ?? ''} onChange={(e) => set('database', e.target.value)} placeholder="orders" spellCheck={false} />
+              </label>
+              <label className="field narrow">
+                <span>SSL</span>
+                <select value={c.sslMode ?? 'prefer'} onChange={(e) => set('sslMode', e.target.value as SslMode)} title="disable: never · prefer: if the server offers it · require: always, without checking the certificate · verify-full: check the certificate and the host name">
+                  <option value="disable">disable</option>
+                  <option value="allow">allow</option>
+                  <option value="prefer">prefer</option>
+                  <option value="require">require</option>
+                  <option value="verify-ca">verify-ca</option>
+                  <option value="verify-full">verify-full</option>
+                </select>
+              </label>
+            </div>
+          )}
+          {!pg && c.mode === 'service' && (
             <label className="field">
               <span>Service name</span>
               <input value={c.service ?? ''} onChange={(e) => set('service', e.target.value)} placeholder="ORCLPDB1" spellCheck={false} />
             </label>
           )}
-          {c.mode === 'sid' && (
+          {!pg && c.mode === 'sid' && (
             <label className="field">
               <span>SID</span>
               <input value={c.sid ?? ''} onChange={(e) => set('sid', e.target.value)} placeholder="ORCL" spellCheck={false} />
             </label>
           )}
-          {c.mode === 'tns' && (
+          {!pg && c.mode === 'tns' && (
             <>
               <label className="field">
                 <span>Descriptor or alias</span>
