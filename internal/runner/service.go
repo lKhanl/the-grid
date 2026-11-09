@@ -1,8 +1,6 @@
 package runner
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"net"
@@ -417,21 +415,13 @@ func (s *Service) buildDone(gen, code int, took time.Duration, cfg config.Servic
 func (s *Service) read(gen int, r io.ReadCloser, stream string, cfg config.Service, app bool, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer r.Close()
-	br := bufio.NewReaderSize(r, 64*1024)
-	for {
-		line, err := br.ReadBytes('\n')
-		if len(line) > 0 {
-			line = bytes.TrimRight(line, "\r\n")
-			text := decode(line, cfg.Encoding)
-			s.appendLog(stream, text)
-			if app && cfg.ReadyRegexp != nil && cfg.ReadyRegexp.MatchString(StripANSI(text)) {
-				s.markReady(gen, "log matched")
-			}
+	readLines(r, maxLogLine, func(line []byte) {
+		text := decode(line, cfg.Encoding)
+		s.appendLog(stream, text)
+		if app && cfg.ReadyRegexp != nil && cfg.ReadyRegexp.MatchString(StripANSI(text)) {
+			s.markReady(gen, "log matched")
 		}
-		if err != nil {
-			return
-		}
-	}
+	})
 }
 
 func (s *Service) markReady(gen int, why string) {
