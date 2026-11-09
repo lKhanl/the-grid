@@ -162,6 +162,11 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("service %q: %w", key.Value, err)
 		}
 		s.Name = key.Value
+		// the name becomes a log file name and a URL path segment, so a hand-written
+		// file gets the same rule as the form (SaveService)
+		if !nameRe.MatchString(s.Name) {
+			return nil, fmt.Errorf("%s: invalid service name %q: use letters, digits, '.', '_' or '-' (starting with a letter or digit)", abs, s.Name)
+		}
 		if seen[s.Name] {
 			return nil, fmt.Errorf("service %q defined twice", s.Name)
 		}

@@ -230,3 +230,23 @@ func TestSpringStampWrittenAfterBuildDatesFromItsStart(t *testing.T) {
 		t.Fatalf("should skip, note %q", p.Note)
 	}
 }
+
+func TestLoadRejectsBadServiceNames(t *testing.T) {
+	dir := t.TempDir()
+	load := func(name string) error {
+		p := filepath.Join(dir, "grid.yaml")
+		os.WriteFile(p, []byte("services:\n  \""+name+"\":\n    command: echo hi\n"), 0o644)
+		_, err := Load(p)
+		return err
+	}
+	for _, name := range []string{"../x", "a/b", "my service", "-api", ".hidden", ""} {
+		if err := load(name); err == nil || !strings.Contains(err.Error(), "invalid service name") {
+			t.Errorf("name %q: got %v, want an invalid service name error", name, err)
+		}
+	}
+	for _, name := range []string{"api", "web-ui", "account_service", "v1.2", "9lives"} {
+		if err := load(name); err != nil {
+			t.Errorf("name %q: %v", name, err)
+		}
+	}
+}
