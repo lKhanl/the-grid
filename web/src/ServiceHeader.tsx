@@ -23,17 +23,16 @@ export function ServiceHeader({ current, state, run, onEdit, filter, setFilter, 
           <StatusIcon status={current.status} type={current.type} size={18} />
           <span className="title">{current.name}</span>
           <span className={`badge badge-${current.status}`}>{statusLabel(current)}</span>
-          {current.pid ? <span className="muted">pid {current.pid}</span> : null}
           {current.startedAt ? (
-            <span className="muted">
+            <span className="muted uptime" title={current.pid ? `pid ${current.pid}` : undefined}>
               {current.status === 'starting' ? 'starting for' : current.status === 'building' ? 'building for' : 'up'} {uptime(current.startedAt)}
             </span>
           ) : null}
-          {current.restarts > 0 && <span className="muted">restarts {current.restarts}</span>}
+          {current.restarts > 0 && <span className="muted restarts">restarts {current.restarts}</span>}
           <ServiceStats current={current} />
           {current.url && (
-            <a className="link" href={current.url} target="_blank" rel="noreferrer">
-              {current.url} <ExternalIcon size={13} />
+            <a className="link" href={current.url} target="_blank" rel="noreferrer" title={current.url}>
+              <span className="link-text">{current.url}</span> <ExternalIcon size={13} />
             </a>
           )}
           <div className="spacer" />

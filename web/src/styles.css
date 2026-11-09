@@ -129,12 +129,20 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .link:hover { text-decoration: underline; }
 .filter-wrap { position: relative; display: flex; align-items: center; color: var(--muted); }
 .filter-wrap .icon { position: absolute; left: 10px; pointer-events: none; }
-/* A narrow window: the buttons keep their size, the filter and then the URL give way. */
-.toolbar > .btn, .toolbar > .title, .toolbar > .badge, .toolbar > .status-icon { flex: none; }
+/* A narrow window: the filter shrinks and the URL ends in "…"; then, step by step, the sparklines,
+   the button labels (icons stay, the tooltip names them), the uptime and the CPU / RAM go away
+   whole instead of being cut in the middle. */
+.toolbar { container: toolbar / inline-size; }
+.toolbar > .btn, .toolbar > .title, .toolbar > .badge, .toolbar > .status-icon, .toolbar > .muted, .toolbar > .stats { flex: none; }
 .toolbar > .link { min-width: 48px; overflow: hidden; }
-.toolbar > .filter-wrap { flex: 0 1 260px; min-width: 120px; }
+.toolbar > .link .link-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@container toolbar (max-width: 1500px) { .metric .spark { display: none; } }
+@container toolbar (max-width: 1300px) { .toolbar > .btn.text > span { display: none; } .toolbar > .btn.text { padding: 0 9px; } }
+@container toolbar (max-width: 1050px) { .toolbar > .uptime, .toolbar > .restarts { display: none; } }
+@container toolbar (max-width: 850px) { .toolbar > .stats { display: none; } }
+.toolbar > .filter-wrap { flex: 0 1 234px; min-width: 108px; }
 .toolbar > .filter-wrap .filter { width: 100%; }
-.filter { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 5px; height: 34px; width: 260px; padding: 0 10px 0 32px; font: inherit; font-size: 14px; outline: none; }
+.filter { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 5px; height: 34px; width: 234px; padding: 0 10px 0 32px; font: inherit; font-size: 14px; outline: none; }
 .filter:focus { border-color: var(--accent); }
 .subbar { padding: 6px 14px; font-size: 14px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .subbar code { font-family: 'JetBrains Mono', Consolas, Menlo, monospace; color: #c9a26d; }
@@ -555,7 +563,7 @@ table.diff .sign { display: inline-block; width: 1.2ch; margin-right: 1ch; color
 
 /* ---- database panel ---- */
 /* CPU / RAM of the selected service */
-.stats { display: inline-flex; gap: 6px; min-width: 0; overflow: hidden; } /* gives way first in a narrow window */
+.stats { display: inline-flex; gap: 6px; }
 .metric { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; font-size: 12.5px; color: var(--text); font-variant-numeric: tabular-nums; }
 .metric-label { color: var(--muted); font-size: 11px; letter-spacing: .05em; }
 .metric-value { min-width: 4.2ch; text-align: right; }
