@@ -163,6 +163,53 @@ func New(m *runner.Manager, terms *term.Manager, store *state.Store, ui fs.FS, m
 	mux.HandleFunc("PUT /api/config/services/{name}", func(w http.ResponseWriter, r *http.Request) {
 		save(w, r, r.PathValue("name"))
 	})
+	// Changes view: hide a path (POST) or show it again (DELETE) by editing the service's changes_ignore
+	ignoreEdit := func(w http.ResponseWriter, r *http.Request, add bool) {
+		var body struct {
+			Pattern string `json:"pattern"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Pattern) == "" {
+			writeError(w, http.StatusBadRequest, "expected a pattern")
+			return
+		}
+		pat := strings.TrimSpace(body.Pattern)
+		name := r.PathValue("name")
+		spec, err := config.ReadSpec(m.ConfigPath(), name)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		var list []string
+		found := false
+		for _, p := range spec.ChangesIgnore {
+			if p == pat {
+				found = true
+				if !add {
+					continue
+				}
+			}
+			list = append(list, p)
+		}
+		if add && !found {
+			list = append(list, pat)
+		}
+		if !add && !found {
+			writeError(w, http.StatusNotFound, fmt.Sprintf("%s has no pattern %q (edit the service to change its patterns)", name, pat))
+			return
+		}
+		spec.ChangesIgnore = list
+		if err := config.SaveService(m.ConfigPath(), name, spec); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := m.Reload(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"changesIgnore": list})
+	}
+	mux.HandleFunc("POST /api/config/services/{name}/changes-ignore", func(w http.ResponseWriter, r *http.Request) { ignoreEdit(w, r, true) })
+	mux.HandleFunc("DELETE /api/config/services/{name}/changes-ignore", func(w http.ResponseWriter, r *http.Request) { ignoreEdit(w, r, false) })
 	mux.HandleFunc("DELETE /api/config/services/{name}", func(w http.ResponseWriter, r *http.Request) {
 		if err := config.DeleteService(m.ConfigPath(), r.PathValue("name")); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())

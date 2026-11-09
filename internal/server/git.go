@@ -21,8 +21,29 @@ type gitProject struct {
 	Root     string         `json:"root"`   // repository top-level folder
 	Prefix   string         `json:"prefix"` // project folder inside the repository ("" = the root), slash separated
 	Branch   string         `json:"branch"`
-	Files    []gitdiff.File `json:"files"` // paths relative to Root
+	Files    []gitdiff.File `json:"files"`   // paths relative to Root
+	Ignored  []ignoredFile  `json:"ignored"` // changed, but hidden by a changes_ignore pattern of the project's services
 	hidden   bool           // a service of the project is set to stay out of Changes (services in one folder share a project)
+	patterns []string       // changes_ignore of its services (relative to the project folder)
+	ignore   *gitdiff.Ignore
+}
+
+type ignoredFile struct {
+	gitdiff.File
+	Pattern string `json:"pattern"` // the pattern that hides it
+}
+
+// add puts a changed file in the project, or in its ignored list when a pattern hides it.
+func (p *gitProject) add(f gitdiff.File) {
+	rel := f.Path
+	if p.Prefix != "" {
+		rel = strings.TrimPrefix(f.Path, p.Prefix+"/")
+	}
+	if pat := p.ignore.Match(rel); pat != "" {
+		p.Ignored = append(p.Ignored, ignoredFile{File: f, Pattern: pat})
+		return
+	}
+	p.Files = append(p.Files, f)
 }
 
 func under(path, prefix string) bool {
@@ -68,7 +89,7 @@ func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 		k := key{root, prefix}
 		p := projects[k]
 		if p == nil {
-			p = &gitProject{Key: root + "|" + prefix, Name: s.Name, Root: root, Prefix: prefix, Files: []gitdiff.File{}}
+			p = &gitProject{Key: root + "|" + prefix, Name: s.Name, Root: root, Prefix: prefix, Files: []gitdiff.File{}, Ignored: []ignoredFile{}}
 			projects[k] = p
 		}
 		if s.NoChanges {
@@ -76,6 +97,10 @@ func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 		}
 		p.Services = append(p.Services, s.Name)
 		p.Types = append(p.Types, string(s.Type))
+		p.patterns = append(p.patterns, s.ChangesIgnore...)
+	}
+	for _, p := range projects {
+		p.ignore = gitdiff.NewIgnore(p.patterns)
 	}
 	if len(projects) == 0 {
 		return []gitProject{}, firstErr
@@ -101,7 +126,7 @@ func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 			placed := false
 			for _, p := range list {
 				if p.Prefix != "" && under(f.Path, p.Prefix) {
-					p.Files = append(p.Files, f)
+					p.add(f)
 					placed = true
 					break
 				}
@@ -118,13 +143,13 @@ func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 				}
 				return nil
 			}(); root0 != nil {
-				root0.Files = append(root0.Files, f)
+				root0.add(f)
 			} else {
 				other = append(other, f)
 			}
 		}
 		for _, p := range list {
-			if len(p.Files) == 0 || p.hidden { // a hidden project still claims its files, so they do not show up as "other files"
+			if len(p.Files)+len(p.Ignored) == 0 || p.hidden { // a hidden project still claims its files, so they do not show up as "other files"
 				continue
 			}
 			p.Branch = st.Branch
@@ -132,7 +157,7 @@ func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 		}
 		if len(other) > 0 {
 			out = append(out, gitProject{Key: root + "|*", Name: filepath.Base(root) + " (other files)", Root: root, Branch: st.Branch, Files: other,
-				Services: []string{}, Types: []string{}})
+				Ignored: []ignoredFile{}, Services: []string{}, Types: []string{}})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

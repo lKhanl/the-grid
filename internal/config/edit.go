@@ -57,31 +57,32 @@ type JarSpec struct {
 
 // ServiceSpec is the editable, as-written form of a service.
 type ServiceSpec struct {
-	Name         string      `json:"name"`
-	Group        string      `json:"group"`
-	Description  string      `json:"description"`
-	Type         string      `json:"type"`
-	Command      string      `json:"command"`
-	Spring       *SpringSpec `json:"spring,omitempty"`
-	Node         *NodeSpec   `json:"node,omitempty"`
-	Script       *ScriptSpec `json:"script,omitempty"`
-	Jar          *JarSpec    `json:"jar,omitempty"`
-	Cwd          string      `json:"cwd"`
-	Shell        string      `json:"shell"`
-	Runtime      []string    `json:"runtime"`
-	Env          []EnvVar    `json:"env"`
-	EnvFile      string      `json:"envFile"`
-	Encoding     string      `json:"encoding"`
-	DependsOn    []string    `json:"dependsOn"`
-	ReadyPort    int         `json:"readyPort"`
-	ReadyLog     string      `json:"readyLog"`
-	ReadyTimeout string      `json:"readyTimeout"`
-	Restart      string      `json:"restart"`
-	MaxRestarts  int         `json:"maxRestarts"`
-	Autostart    bool        `json:"autostart"`
-	StopTimeout  string      `json:"stopTimeout"`
-	URL          string      `json:"url"`
-	NoChanges    bool        `json:"noChanges"` // keep the project out of the Changes view
+	Name          string      `json:"name"`
+	Group         string      `json:"group"`
+	Description   string      `json:"description"`
+	Type          string      `json:"type"`
+	Command       string      `json:"command"`
+	Spring        *SpringSpec `json:"spring,omitempty"`
+	Node          *NodeSpec   `json:"node,omitempty"`
+	Script        *ScriptSpec `json:"script,omitempty"`
+	Jar           *JarSpec    `json:"jar,omitempty"`
+	Cwd           string      `json:"cwd"`
+	Shell         string      `json:"shell"`
+	Runtime       []string    `json:"runtime"`
+	Env           []EnvVar    `json:"env"`
+	EnvFile       string      `json:"envFile"`
+	Encoding      string      `json:"encoding"`
+	DependsOn     []string    `json:"dependsOn"`
+	ReadyPort     int         `json:"readyPort"`
+	ReadyLog      string      `json:"readyLog"`
+	ReadyTimeout  string      `json:"readyTimeout"`
+	Restart       string      `json:"restart"`
+	MaxRestarts   int         `json:"maxRestarts"`
+	Autostart     bool        `json:"autostart"`
+	StopTimeout   string      `json:"stopTimeout"`
+	URL           string      `json:"url"`
+	NoChanges     bool        `json:"noChanges"`     // keep the project out of the Changes view
+	ChangesIgnore []string    `json:"changesIgnore"` // paths hidden from the Changes view
 }
 
 type rawSpec struct {
@@ -105,12 +106,13 @@ type rawSpec struct {
 		Log     string `yaml:"log"`
 		Timeout string `yaml:"timeout"`
 	} `yaml:"ready"`
-	Restart     string `yaml:"restart"`
-	MaxRestarts int    `yaml:"max_restarts"`
-	Autostart   bool   `yaml:"autostart"`
-	StopTimeout string `yaml:"stop_timeout"`
-	URL         string `yaml:"url"`
-	Changes     *bool  `yaml:"changes"`
+	Restart       string     `yaml:"restart"`
+	MaxRestarts   int        `yaml:"max_restarts"`
+	Autostart     bool       `yaml:"autostart"`
+	StopTimeout   string     `yaml:"stop_timeout"`
+	URL           string     `yaml:"url"`
+	Changes       *bool      `yaml:"changes"`
+	ChangesIgnore StringList `yaml:"changes_ignore"`
 }
 
 var (
@@ -121,7 +123,7 @@ var (
 
 // keyOrder is used when adding keys to a service.
 var keyOrder = []string{"group", "description", "type", "cwd", "command", "spring", "node", "script", "jar", "shell", "runtime", "env", "env_file",
-	"encoding", "depends_on", "ready", "restart", "max_restarts", "autostart", "stop_timeout", "url", "changes"}
+	"encoding", "depends_on", "ready", "restart", "max_restarts", "autostart", "stop_timeout", "url", "changes", "changes_ignore"}
 
 func loadDoc(path string) (*yaml.Node, *yaml.Node, error) {
 	doc, root, err := loadRoot(path)
@@ -290,6 +292,21 @@ func applySpec(m *yaml.Node, s ServiceSpec) {
 	} else {
 		setKey(m, "changes", nil)
 	}
+	var ignore []string
+	for _, p := range s.ChangesIgnore {
+		if p = strings.TrimSpace(p); p != "" {
+			ignore = append(ignore, p)
+		}
+	}
+	if len(ignore) == 0 {
+		setKey(m, "changes_ignore", nil)
+	} else {
+		seq := &yaml.Node{Kind: yaml.SequenceNode}
+		for _, p := range ignore {
+			seq.Content = append(seq.Content, scalar(p))
+		}
+		setKey(m, "changes_ignore", seq)
+	}
 }
 
 func boolNode(v bool) *yaml.Node {
@@ -448,7 +465,7 @@ func ReadSpec(path, name string) (ServiceSpec, error) {
 		Shell: r.Shell, Runtime: r.Runtime, EnvFile: r.EnvFile, Encoding: r.Encoding,
 		DependsOn: r.DependsOn, Restart: r.Restart, MaxRestarts: r.MaxRestarts,
 		Autostart: r.Autostart, StopTimeout: r.StopTimeout, URL: r.URL,
-		NoChanges: r.Changes != nil && !*r.Changes,
+		NoChanges: r.Changes != nil && !*r.Changes, ChangesIgnore: r.ChangesIgnore,
 	}
 	if r.Ready != nil {
 		s.ReadyPort, s.ReadyLog, s.ReadyTimeout = r.Ready.Port, r.Ready.Log, r.Ready.Timeout

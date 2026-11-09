@@ -10,7 +10,7 @@ export const ACTIVE = new Set(['starting', 'building', 'running', 'stopping'])
 export const BUILDS = new Set(['spring-boot', 'node'])
 
 export function formatBytes(n: number) {
-  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`
+  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(2)} GB`
   if (n >= 1 << 20) return `${Math.round(n / (1 << 20))} MB`
   return `${Math.round(n / 1024)} KB`
 }

@@ -475,3 +475,40 @@ func TestRunQueryPaging(t *testing.T) {
 		t.Fatalf("past the end: %v %+v", err, past)
 	}
 }
+
+func TestStoreReloadSeesOutsideEdits(t *testing.T) {
+	dir := t.TempDir()
+	s := OpenStore(dir)
+	for _, n := range []string{"dev", "test"} {
+		if _, err := s.Put("", Conn{Name: n, Host: "h", Service: "s", User: "u"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// someone else edits the file: dev changes, test goes, qa comes
+	other := OpenStore(dir)
+	if _, err := other.Put("dev", Conn{Name: "dev", Host: "h2", Service: "s", User: "u"}); err != nil {
+		t.Fatal(err)
+	}
+	other.Delete("test")
+	other.Put("", Conn{Name: "qa", Host: "h", Service: "s", User: "u"})
+
+	added, removed, changed, err := s.Reload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(added, ",") != "qa" || strings.Join(removed, ",") != "test" || strings.Join(changed, ",") != "dev" {
+		t.Fatalf("added %v removed %v changed %v", added, removed, changed)
+	}
+	if c, _ := s.Get("dev"); c.Host != "h2" {
+		t.Fatalf("dev not reloaded: %+v", c)
+	}
+
+	// a broken file is an error and keeps what was loaded
+	os.WriteFile(filepath.Join(dir, "connections.json"), []byte("{oops"), 0o600)
+	if _, _, _, err := s.Reload(); err == nil {
+		t.Fatal("corrupt file accepted")
+	}
+	if len(s.List()) != 2 {
+		t.Fatalf("lost the connections: %v", s.List())
+	}
+}

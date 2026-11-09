@@ -88,6 +88,11 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return r.json()
 }
 
+/** Re-read connections.json on the server (it may have been edited outside the Grid). */
+export async function dbReloadFile() {
+  return post<{ added: string[]; removed: string[]; changed: string[]; total: number }>('/api/dbconn/reload')
+}
+
 export async function dbList(): Promise<DbView[]> {
   return (await check(await fetch('/api/dbconn'))).json()
 }

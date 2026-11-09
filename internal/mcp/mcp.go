@@ -128,7 +128,7 @@ func (s *Server) handle(req request, notify func(string, any)) (any, *rpcError) 
 			"protocolVersion": p.ProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "grid", "version": s.Version},
-			"instructions":    "Controls the services of The Grid. Use restart after changing a service's code, then read the log tail it returns (only what that start produced). To look into a problem use logs with level=error, grep or since_restart instead of reading many lines; describe tells where a service lives and how it runs." + dbInstructions + " Builds can be slow: if restart says the service is still building or starting, that is NOT a failure; call wait (never restart again) until it is running.",
+			"instructions":    "Controls the services of The Grid. Use restart after changing a service's code, then read the log tail it returns (only what that start produced). After editing grid.yaml (services, runtimes) or the database connections, call reload. To look into a problem use logs with level=error, grep or since_restart instead of reading many lines; describe tells where a service lives and how it runs." + dbInstructions + " Builds can be slow: if restart says the service is still building or starting, that is NOT a failure; call wait (never restart again) until it is running.",
 		}, nil
 	case "ping":
 		return map[string]any{}, nil
@@ -213,6 +213,11 @@ var tools = []map[string]any{
 		},
 	},
 	{
+		"name":        "reload",
+		"description": "Re-read the config after it was changed outside the Grid UI: grid.yaml (services, runtimes, env) and, in builds with the Database panel, the saved database connections. Call it after adding, editing or removing a service, runtime or database connection in those files; until then the Grid keeps the old config. Removed services are stopped; running services keep running and use their new settings at the next restart.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+	},
+	{
 		"name":        "wait",
 		"description": "Keep waiting for a service that restart reported as still building or starting. Returns when it is running or has failed, with the last log lines.",
 		"inputSchema": map[string]any{
@@ -253,6 +258,8 @@ func (s *Server) call(name string, args map[string]any, progress func(string)) (
 	case "wait":
 		svc, _ := args["service"].(string)
 		return s.waitTool(svc, s.waitArg(args), progress)
+	case "reload":
+		return s.reload()
 	}
 	if text, ok, err := s.callDB(name, args); ok {
 		return text, err
@@ -413,6 +420,58 @@ func (s *Server) status() (string, error) {
 		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+// reload re-reads grid.yaml (and the database connections) and says what changed.
+func (s *Server) reload() (string, error) {
+	before, err := s.services()
+	if err != nil {
+		return "", err
+	}
+	b, err := s.do("POST", "/api/reload")
+	if err != nil {
+		return "", fmt.Errorf("grid.yaml not reloaded: %w", err)
+	}
+	var st struct {
+		Services []info
+		Runtimes []struct{ Name, Error string }
+	}
+	if err := json.Unmarshal(b, &st); err != nil {
+		return "", err
+	}
+	was := map[string]bool{}
+	for _, v := range before {
+		was[v.Name] = true
+	}
+	var added, removed []string
+	for _, v := range st.Services {
+		if !was[v.Name] {
+			added = append(added, v.Name)
+		}
+		delete(was, v.Name)
+	}
+	for name := range was {
+		removed = append(removed, name)
+	}
+	sort.Strings(removed)
+	var out strings.Builder
+	fmt.Fprintf(&out, "grid.yaml reloaded: %d services, %d runtimes.", len(st.Services), len(st.Runtimes))
+	if len(added) > 0 {
+		fmt.Fprintf(&out, "\nadded: %s (stopped; start them with restart action=start)", strings.Join(added, ", "))
+	}
+	if len(removed) > 0 {
+		fmt.Fprintf(&out, "\nremoved (stopped): %s", strings.Join(removed, ", "))
+	}
+	for _, r := range st.Runtimes {
+		if r.Error != "" {
+			fmt.Fprintf(&out, "\nruntime %s: %s", r.Name, r.Error)
+		}
+	}
+	out.WriteString("\nRunning services use changed settings at their next restart.")
+	if text := s.dbReload(); text != "" {
+		out.WriteString("\n" + text)
+	}
+	return out.String(), nil
 }
 
 func inProgress(status string) bool {

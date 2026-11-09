@@ -349,3 +349,37 @@ func TestChangesVisibilityRoundTrip(t *testing.T) {
 		t.Fatalf("key left behind:\n%s", out)
 	}
 }
+
+func TestChangesIgnoreRoundTrip(t *testing.T) {
+	p := setup(t)
+	spec, err := ReadSpec(p, "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.ChangesIgnore = []string{"*.iml", " tmp/ ", ""} // trimmed, empty lines dropped
+	if err := SaveService(p, "api", spec); err != nil {
+		t.Fatal(err)
+	}
+	if out := read(t, p); !strings.Contains(out, "changes_ignore:") || !strings.Contains(out, "- '*.iml'") && !strings.Contains(out, `- "*.iml"`) {
+		t.Fatalf("not written:\n%s", out)
+	}
+	if spec, _ = ReadSpec(p, "api"); strings.Join(spec.ChangesIgnore, ",") != "*.iml,tmp/" {
+		t.Fatalf("read back %q", spec.ChangesIgnore)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range cfg.Services {
+		if s.Name == "api" && strings.Join(s.ChangesIgnore, ",") != "*.iml,tmp/" {
+			t.Fatalf("Load: %q", s.ChangesIgnore)
+		}
+	}
+	spec.ChangesIgnore = nil
+	if err := SaveService(p, "api", spec); err != nil {
+		t.Fatal(err)
+	}
+	if out := read(t, p); strings.Contains(out, "changes_ignore") {
+		t.Fatalf("key left behind:\n%s", out)
+	}
+}

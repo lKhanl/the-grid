@@ -26,7 +26,7 @@ var Features []string
 var LogLineOptions = []int{1000, 2500, 5000, 10000}
 
 // DefaultLogLines is used until the user picks another size.
-const DefaultLogLines = 5000
+const DefaultLogLines = 1000
 
 // ValidLogLines reports whether n is one of LogLineOptions.
 func ValidLogLines(n int) bool {

@@ -28,23 +28,24 @@ const (
 
 // Info is the public, JSON-friendly view of a service.
 type Info struct {
-	Name        string   `json:"name"`
-	Group       string   `json:"group"`
-	Description string   `json:"description,omitempty"`
-	Status      Status   `json:"status"`
-	PID         int      `json:"pid,omitempty"`
-	ExitCode    *int     `json:"exitCode,omitempty"`
-	StartedAt   int64    `json:"startedAt,omitempty"`
-	Restarts    int      `json:"restarts"`
-	Type        string   `json:"type"`
-	Build       string   `json:"build,omitempty"` // build step preview
-	Command     string   `json:"command"`         // run command preview
-	Cwd         string   `json:"cwd"`
-	URL         string   `json:"url,omitempty"`
-	DependsOn   []string `json:"dependsOn,omitempty"`
-	Ready       string   `json:"ready,omitempty"`
-	Runtimes    []string `json:"runtimes,omitempty"`
-	NoChanges   bool     `json:"noChanges,omitempty"` // left out of the Changes view
+	Name          string   `json:"name"`
+	Group         string   `json:"group"`
+	Description   string   `json:"description,omitempty"`
+	Status        Status   `json:"status"`
+	PID           int      `json:"pid,omitempty"`
+	ExitCode      *int     `json:"exitCode,omitempty"`
+	StartedAt     int64    `json:"startedAt,omitempty"`
+	Restarts      int      `json:"restarts"`
+	Type          string   `json:"type"`
+	Build         string   `json:"build,omitempty"` // build step preview
+	Command       string   `json:"command"`         // run command preview
+	Cwd           string   `json:"cwd"`
+	URL           string   `json:"url,omitempty"`
+	DependsOn     []string `json:"dependsOn,omitempty"`
+	Ready         string   `json:"ready,omitempty"`
+	Runtimes      []string `json:"runtimes,omitempty"`
+	NoChanges     bool     `json:"noChanges,omitempty"`     // left out of the Changes view
+	ChangesIgnore []string `json:"changesIgnore,omitempty"` // paths (relative to Cwd) hidden from the Changes view
 	// CPU is the process tree's CPU use in percent of one core, Mem its
 	// resident memory in bytes; both only while a process runs.
 	CPU     *float64 `json:"cpu,omitempty"`
@@ -92,7 +93,7 @@ func (s *Service) Info() Info {
 		Name: s.name, Group: s.cfg.Group, Description: s.cfg.Description, Status: s.status,
 		PID: s.pid, ExitCode: s.exitCode, Restarts: s.restarts,
 		Type: s.cfg.Type, Build: s.prevBuild, Command: s.prevRun, Cwd: s.cfg.Cwd, URL: s.cfg.URL, DependsOn: s.cfg.DependsOn,
-		Runtimes: s.cfg.Runtime, NoChanges: !s.cfg.ShowInChanges(),
+		Runtimes: s.cfg.Runtime, NoChanges: !s.cfg.ShowInChanges(), ChangesIgnore: s.cfg.ChangesIgnore,
 		LogFile: s.mgr.files.path(s.wsKey, s.name),
 	}
 	if s.proc != nil && s.stats.proc == s.proc {

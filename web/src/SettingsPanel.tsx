@@ -47,7 +47,7 @@ interface Props {
 
 /** Settings panel in the sidebar: theme, effects, logs, keyboard shortcuts. */
 export function SettingsPanel({ state, setState, setError, theme, setTheme, neon, setNeon, reducedMotion }: Props) {
-  const logLines = state?.logLines ?? 5000
+  const logLines = state?.logLines ?? 1000
   return (
     <>
       <div className="sidebar-head divided">

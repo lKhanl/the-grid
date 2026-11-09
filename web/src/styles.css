@@ -51,9 +51,15 @@ html, body, #root { height: 100%; margin: 0; }
 .topbar { position: relative; display: flex; align-items: center; gap: 12px; height: 50px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid #0d4a56; box-shadow: 0 1px 14px rgba(25,198,230,.16); z-index: 1; }
 .brand { font-weight: 600; font-size: 18px; }
 .brand-name { font-weight: 700; letter-spacing: .24em; color: #c9f8ff; text-shadow: 0 0 6px rgba(94,242,255,.65), 0 0 18px rgba(25,198,230,.35); }
-.workspace { color: var(--muted); font-weight: 500; font-size: 15px; padding-left: 12px; margin-left: 2px; border-left: 1px solid var(--border); }
+/* workspace switcher: looks like a dropdown */
+.workspace { display: inline-flex; align-items: center; gap: 8px; height: 32px; max-width: 320px; padding: 0 10px; margin-left: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.workspace .icon { flex: none; color: var(--muted); }
+.workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace:hover, .workspace.on { border-color: var(--accent); background: var(--hover); }
+.workspace:hover .icon, .workspace.on .icon { color: var(--text); }
 .brand { display: flex; align-items: center; gap: 8px; }
-.logo { color: var(--glow); display: flex; filter: drop-shadow(0 0 5px rgba(94,242,255,.8)); }
+/* the logo looks the same in every theme (fixed colour, not --glow) */
+.logo { color: #5ef2ff; display: flex; filter: drop-shadow(0 0 5px rgba(94,242,255,.8)); }
 .summary { color: var(--muted); }
 .offline { color: var(--yellow); }
 .error { background: #4a2326; color: #ffb3ad; padding: 6px 12px; cursor: pointer; border-bottom: 1px solid #6b2f33; }
@@ -147,6 +153,8 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 
 /* ---- sidebar head ---- */
 .sidebar-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 10px 8px 14px; color: var(--muted); font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; }
+/* the panel's name: full text colour so it reads as a title, not a hint */
+.sidebar-head > span:first-child { color: var(--text); font-weight: 600; }
 .btn.text.small { height: 28px; padding: 0 9px; font-size: 13px; text-transform: none; letter-spacing: 0; }
 .empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 
@@ -293,6 +301,10 @@ details.form-section[open] summary { margin-bottom: 10px; }
 .picker-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-row.project .name { font-weight: 600; }
 .picker-folder { color: #8c9099; }
+/* workspaces: name and path on two lines, so the row grows with them */
+.picker-row.ws-row { height: auto; min-height: 52px; padding: 9px 10px; margin-bottom: 4px; }
+.ws-row .name { line-height: 1.4; }
+.ws-row .ws-path { margin-top: 3px; font-weight: 400; font-size: 12px !important; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; }
 .picker-msg { padding: 12px; }
 .picker-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; font-family: ui-monospace, monospace; }
 .chips input.chip-input { width: 110px; flex: none; }
@@ -334,6 +346,8 @@ details.form-section[open] summary { margin-bottom: 10px; }
 
 /* ---- collapsible groups ---- */
 .group-head { cursor: pointer; user-select: none; gap: 6px; }
+.group-head:hover { background: var(--hover); } /* same as the Changes panel rows */
+.group + .group .group-head { border-top: 1px solid var(--line); } /* a line between groups, like the Changes projects (none under the panel header) */
 .group-head:hover .group-name { color: var(--text); }
 .group-chevron { display: inline-flex; margin-left: -4px; color: var(--muted); transition: transform .15s; }
 .group-chevron.open { transform: rotate(90deg); }
@@ -380,8 +394,6 @@ details.form-section[open] summary { margin-bottom: 10px; }
   --sql-annot: #b3ae60;
 }
 [data-theme='basic'] .topbar { border-bottom-color: var(--border); box-shadow: none; }
-[data-theme='basic'] .brand-name { letter-spacing: .02em; color: var(--text); text-shadow: none; font-weight: 600; }
-[data-theme='basic'] .logo { color: var(--muted); filter: none; }
 [data-theme='basic'] .btn.primary { color: #fff; box-shadow: none; font-weight: 500; }
 [data-theme='basic'] .activity.on { color: var(--text); }
 [data-theme='basic'] .activity.on::before,
@@ -464,12 +476,18 @@ details.form-section[open] summary { margin-bottom: 10px; }
 .term-tab.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); }
 .term-tab .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .term-tab.term-exited .name { text-decoration: line-through; opacity: .7; }
-.tab-close { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 0; border-radius: 4px; background: none; color: inherit; cursor: pointer; opacity: 0; flex: none; }
+.tab-close { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 4px; background: none; color: inherit; cursor: pointer; opacity: 0; flex: none; }
 .term-tab:hover .tab-close, .term-tab.on .tab-close { opacity: .75; }
 .tab-close:hover { opacity: 1 !important; background: #43454a; }
 .term-info { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 10px; font-size: 13px; overflow: hidden; white-space: nowrap; }
 .term-cwd { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .term-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; padding: 0 6px; flex: none; }
+/* two buttons drawn as one: [ + New | v ] */
+.split-btn { display: inline-flex; margin-right: 2px; }
+.split-btn .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split-btn .split-arrow { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 0; padding: 0 5px; }
+.split-btn .split-arrow.on { background: var(--hover); color: var(--text); }
+.term-sep { width: 1px; height: 18px; margin: 0 6px; background: var(--border); }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 26px; border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; }
 .icon-btn:hover, .icon-btn.on { color: var(--text); background: var(--hover); }
 .term-stack { flex: 1; min-height: 0; display: flex; background: var(--bg); }
@@ -495,8 +513,14 @@ details.form-section[open] summary { margin-bottom: 10px; }
 .git-row:hover { background: var(--hover); }
 .git-file.on { background: var(--sel); }
 .git-proj { min-height: 36px; padding-left: 12px; font-weight: 600; border-top: 1px solid var(--line); }
-.git-project:first-of-type .git-proj { border-top: 0; }
+/* the first project sits right under the header line: no second line (first-of-type would count the header div) */
+.git-project:not(.git-project ~ .git-project) .git-proj { border-top: 0; }
 .git-dir { color: var(--muted); }
+/* hidden by a changes_ignore pattern, shown on demand */
+.git-row.git-ignored { opacity: .45; }
+.git-row.git-ignored:hover { opacity: .75; }
+.btn.text.small.git-hidden-btn { height: 22px; padding: 0 7px; font-size: 11.5px; color: var(--muted); }
+.btn.text.small.git-hidden-btn.on { color: var(--text); border-color: var(--accent); }
 .git-dir .fname { color: var(--text); }
 .git-type { display: inline-flex; color: var(--accent); }
 .git-count { min-width: 18px; text-align: center; font-size: 11.5px; color: var(--muted); background: var(--chip); border-radius: 9px; padding: 0 6px; }
@@ -530,12 +554,27 @@ table.diff td.num.del, table.diff tr.del td.num { background: color-mix(in srgb,
 table.diff .sign { display: inline-block; width: 1.2ch; margin-right: 1ch; color: var(--muted); user-select: none; }
 
 /* ---- database panel ---- */
-.head-actions { display: inline-flex; gap: 2px; }
+/* CPU / RAM of the selected service */
+.stats { display: inline-flex; gap: 6px; min-width: 0; overflow: hidden; } /* gives way first in a narrow window */
+.metric { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; font-size: 12.5px; color: var(--text); font-variant-numeric: tabular-nums; }
+.metric-label { color: var(--muted); font-size: 11px; letter-spacing: .05em; }
+.metric-value { min-width: 4.2ch; text-align: right; }
+.metric .spark { color: var(--accent); opacity: .85; }
+.metric.warn { border-color: #d29922; }
+.metric.warn .metric-value, .metric.warn .spark { color: #e3b341; }
+.metric.hot { border-color: var(--red); }
+.metric.hot .metric-value, .metric.hot .spark { color: var(--red); }
+.row .meta.meta-stats { font-variant-numeric: tabular-nums; font-size: 12px; }
+.head-actions { display: inline-flex; align-items: center; gap: 4px; }
 .db-msg.db-empty-side { display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 36px; text-align: center; }
 .db-msg { padding: 6px 14px; font-size: 13px; line-height: 1.5; }
 .db-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--border); }
 .db-dot.on { background: var(--green); }
 .db-dot.tx { background: var(--yellow); }
+/* the AI badge and the hover icons share one fixed-width slot, so hovering does not shift the row */
+.db-conn { margin: 5px 0; }
+.db-conn .meta { min-width: 60px; text-align: right; }
+
 .db-tree { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
 .db-tree-head { display: flex; gap: 6px; padding: 0 10px 6px 14px; }
 .db-tree-head select, .db-tree-head input, .db-select { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 5px; height: 28px; padding: 0 8px; font: inherit; font-size: 13px; outline: none; min-width: 0; }
@@ -543,8 +582,14 @@ table.diff .sign { display: inline-block; width: 1.2ch; margin-right: 1ch; color
 .db-tree-head input { flex: 1; }
 .db-tree-head select:focus, .db-tree-head input:focus, .db-select:focus { border-color: var(--accent); }
 .db-select { height: 34px; }
-.db-table { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 14px; cursor: pointer; user-select: none; font-size: 13.5px; }
+.db-table { display: flex; align-items: center; gap: 6px; height: 32px; margin-top: 5px; padding: 3px 10px 3px 14px; cursor: pointer; user-select: none; font-size: 13.5px; }
 .db-table:hover { background: var(--hover); }
+@keyframes cm-inserted { from { background: color-mix(in srgb, var(--accent) 35%, transparent); } to { background: transparent; } }
+/* SELECT * button: shown on hover, takes the place of the view / mview label so the row does not shift */
+.db-select-btn { display: none; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); color: var(--muted); font: inherit; font-size: 11px; letter-spacing: .03em; padding: 1px 6px; cursor: pointer; }
+.db-select-btn:hover { color: var(--accent); border-color: var(--accent); }
+.db-table:hover .db-select-btn { display: inline-block; }
+.db-table:hover .db-kind { display: none; }
 .db-table .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .db-cols { padding-bottom: 4px; }
 .db-col { display: flex; justify-content: space-between; gap: 10px; padding: 1px 12px 1px 36px; font-size: 12.5px; font-family: 'JetBrains Mono', Consolas, Menlo, monospace; }

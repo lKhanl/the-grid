@@ -27,6 +27,31 @@ const (
 // dbInstructions is appended to the server instructions.
 const dbInstructions = " Databases the user shared are reachable with db_list, db_tables, db_describe and db_query (read-only; always describe a table before querying it)."
 
+// dbReload re-reads the saved database connections; the text says what changed (or why not).
+func (s *Server) dbReload() string {
+	b, err := s.do("POST", "/api/dbconn/reload")
+	if err != nil {
+		return "database connections not reloaded: " + err.Error()
+	}
+	var r struct {
+		Added, Removed, Changed []string
+		Total                   int
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		return "database connections: " + err.Error()
+	}
+	text := fmt.Sprintf("database connections reloaded: %d.", r.Total)
+	for _, p := range []struct {
+		label string
+		names []string
+	}{{"added", r.Added}, {"removed", r.Removed}, {"changed (reconnect on next use)", r.Changed}} {
+		if len(p.names) > 0 {
+			text += fmt.Sprintf("\n%s: %s", p.label, strings.Join(p.names, ", "))
+		}
+	}
+	return text
+}
+
 // callDB runs a database tool; ok is false when name is not one.
 func (s *Server) callDB(name string, args map[string]any) (text string, ok bool, err error) {
 	switch name {

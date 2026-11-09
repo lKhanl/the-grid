@@ -272,6 +272,19 @@ export function StartupSection({
         <input type="checkbox" checked={!spec.noChanges} onChange={(e) => set('noChanges', !e.target.checked)} />
         <span>Show this project in Changes</span>
       </label>
+      {!spec.noChanges && (
+        <label className="field" title="Not shown in Changes, without touching git: works for tracked files too. Right-click a file in Changes to add one.">
+          <span>Hide from Changes (one pattern per line, relative to the working directory)</span>
+          <textarea
+            className="mono"
+            rows={3}
+            value={(spec.changesIgnore ?? []).join('\n')}
+            onChange={(e) => set('changesIgnore', e.target.value.split('\n'))}
+            placeholder={'*.iml\ntmp/\nsrc/main/resources/application-local.yml'}
+            spellCheck={false}
+          />
+        </label>
+      )}
     </section>
   )
 }

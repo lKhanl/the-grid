@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { listShells, termSocketURL, type ShellInfo, type State, type TermInfo } from './api'
-import { ChevronDownIcon, ChevronUpIcon, CloseIcon, PlusIcon, TerminalIcon } from './icons'
+import { ChevronDownIcon, CloseIcon, MaximizeIcon, PanelHideIcon, PlusIcon, RestoreIcon, TerminalIcon } from './icons'
 import { termTheme, type Theme } from './theme'
 
 const FONT = 'JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace'
@@ -255,7 +255,7 @@ export function TermPanel({ open, state, defaultCwd, terms, selected, theme, max
                   onKill(t.id)
                 }}
               >
-                <CloseIcon size={11} />
+                <CloseIcon size={20} />
               </button>
             </div>
           ))}
@@ -279,17 +279,22 @@ export function TermPanel({ open, state, defaultCwd, terms, selected, theme, max
           </span>
         )}
         <div className="term-actions">
-          <button className="icon-btn" title="New terminal (Ctrl+Shift+`)" onClick={() => onNew(loadPrefs())}>
-            <PlusIcon size={15} />
-          </button>
-          <button className={`icon-btn term-new-toggle ${adding ? 'on' : ''}`} title="New terminal with shell / runtimes / folder…" onClick={() => setAdding((a) => !a)}>
-            <ChevronDownIcon size={15} />
-          </button>
+          {/* new terminal: the main part opens one with the last settings, the arrow picks shell / runtimes / folder */}
+          <span className="split-btn">
+            <button className="btn text small" title="New terminal (Ctrl+Shift+`)" onClick={() => onNew(loadPrefs())}>
+              <PlusIcon size={14} />
+              <span>New</span>
+            </button>
+            <button className={`btn text small split-arrow term-new-toggle ${adding ? 'on' : ''}`} title="New terminal with shell / runtimes / folder…" onClick={() => setAdding((a) => !a)}>
+              <ChevronDownIcon size={14} />
+            </button>
+          </span>
+          <span className="term-sep" />
           <button className="icon-btn" title={maximized ? 'Restore panel size' : 'Maximize panel'} onClick={() => onMaximize(!maximized)}>
-            {maximized ? <ChevronDownIcon size={15} /> : <ChevronUpIcon size={15} />}
+            {maximized ? <RestoreIcon size={15} /> : <MaximizeIcon size={15} />}
           </button>
           <button className="icon-btn" title="Hide panel (Ctrl+`) — terminals keep running" onClick={onHide}>
-            <CloseIcon size={14} />
+            <PanelHideIcon size={15} />
           </button>
         </div>
         {adding && (

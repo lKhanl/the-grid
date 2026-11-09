@@ -113,7 +113,7 @@ export async function fetchLogs(service: string, tail = 5000): Promise<Entry[]> 
   return r.json()
 }
 
-const DEFAULT_MAX_LINES = 5000
+const DEFAULT_MAX_LINES = 1000
 
 type Listener = (service: string, entries: Entry[], reset: boolean) => void
 
@@ -243,6 +243,7 @@ export interface ServiceSpec {
   stopTimeout: string
   url: string
   noChanges: boolean // keep the project out of the Changes view
+  changesIgnore?: string[] | null // paths (gitignore-like, relative to cwd) hidden from Changes
 }
 
 export const emptySpec = (): ServiceSpec => ({
@@ -458,6 +459,7 @@ export interface GitProject {
   prefix: string // project folder inside the repository ("" = the root)
   branch: string
   files: GitFile[]
+  ignored: (GitFile & { pattern: string })[] // changed, but hidden by a changes_ignore pattern
 }
 
 export interface GitDiff {
@@ -468,6 +470,17 @@ export interface GitDiff {
 
 export async function gitChanges(): Promise<{ projects: GitProject[]; error?: string }> {
   return (await check(await fetch('/api/git/changes'))).json()
+}
+
+/** Hide a path from Changes (add) or show it again (remove) via the service's changes_ignore. */
+export async function changesIgnore(service: string, pattern: string, add: boolean) {
+  await check(
+    await fetch(`/api/config/services/${encodeURIComponent(service)}/changes-ignore`, {
+      method: add ? 'POST' : 'DELETE',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ pattern }),
+    }),
+  )
 }
 
 export async function gitDiff(repo: string, path: string, signal?: AbortSignal): Promise<GitDiff> {

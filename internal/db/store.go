@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -142,6 +144,58 @@ func (s *Store) save() error {
 		return err
 	}
 	return os.Rename(tmp, s.file)
+}
+
+// Reload re-reads the file, after it was edited outside the Grid (by hand or by an agent).
+// A missing file means no connections; a corrupt or invalid one is an error and changes nothing.
+// It returns the names that were added, removed or changed.
+func (s *Store) Reload() (added, removed, changed []string, err error) {
+	var f storeFile
+	b, err := os.ReadFile(s.file)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return nil, nil, nil, err
+	default:
+		if err := json.Unmarshal(b, &f); err != nil {
+			return nil, nil, nil, fmt.Errorf("%s: %w", s.file, err)
+		}
+	}
+	seen := map[string]bool{}
+	for i := range f.Connections {
+		c := &f.Connections[i]
+		if err := c.Normalize(); err != nil {
+			return nil, nil, nil, fmt.Errorf("connection %q: %w", c.Name, err)
+		}
+		if seen[strings.ToLower(c.Name)] {
+			return nil, nil, nil, fmt.Errorf("two connections are called %q", c.Name)
+		}
+		seen[strings.ToLower(c.Name)] = true
+	}
+	s.mu.Lock()
+	old := map[string]Conn{}
+	for _, c := range s.conns {
+		old[strings.ToLower(c.Name)] = c
+	}
+	s.conns = f.Connections
+	s.mu.Unlock()
+	for _, c := range f.Connections {
+		prev, ok := old[strings.ToLower(c.Name)]
+		switch {
+		case !ok:
+			added = append(added, c.Name)
+		case !reflect.DeepEqual(prev, c):
+			changed = append(changed, c.Name)
+		}
+		delete(old, strings.ToLower(c.Name))
+	}
+	for _, c := range old {
+		removed = append(removed, c.Name)
+	}
+	sort.Strings(added)
+	sort.Strings(removed)
+	sort.Strings(changed)
+	return added, removed, changed, nil
 }
 
 // List returns the connections sorted by name.

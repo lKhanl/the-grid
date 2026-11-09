@@ -60,30 +60,31 @@ func (l *StringList) UnmarshalYAML(n *yaml.Node) error {
 
 // Service is a single runnable entry.
 type Service struct {
-	Name        string            `yaml:"-"`
-	Group       string            `yaml:"group"`
-	Description string            `yaml:"description"`
-	Type        string            `yaml:"type"` // spring-boot | node | script | jar | custom (default)
-	Command     string            `yaml:"command"`
-	Spring      *SpringOpts       `yaml:"spring"`
-	Node        *NodeOpts         `yaml:"node"`
-	Script      *ScriptOpts       `yaml:"script"`
-	Jar         *JarOpts          `yaml:"jar"`
-	Cwd         string            `yaml:"cwd"`
-	Shell       string            `yaml:"shell"`
-	Env         map[string]string `yaml:"env"`
-	EnvFile     string            `yaml:"env_file"`
-	Encoding    string            `yaml:"encoding"` // auto | utf-8 | cp1254
-	DependsOn   []string          `yaml:"depends_on"`
-	Ready       *Ready            `yaml:"ready"`
-	Restart     string            `yaml:"restart"` // no | on-failure | always
-	MaxRestarts int               `yaml:"max_restarts"`
-	Autostart   bool              `yaml:"autostart"`
-	StopTimeout time.Duration     `yaml:"stop_timeout"`
-	URL         string            `yaml:"url"`
-	Changes     *bool             `yaml:"changes"` // false: leave this project out of the Changes view (default: shown)
-	Color       *bool             `yaml:"color"`
-	Runtime     StringList        `yaml:"runtime"` // names from the top-level `runtimes`
+	Name          string            `yaml:"-"`
+	Group         string            `yaml:"group"`
+	Description   string            `yaml:"description"`
+	Type          string            `yaml:"type"` // spring-boot | node | script | jar | custom (default)
+	Command       string            `yaml:"command"`
+	Spring        *SpringOpts       `yaml:"spring"`
+	Node          *NodeOpts         `yaml:"node"`
+	Script        *ScriptOpts       `yaml:"script"`
+	Jar           *JarOpts          `yaml:"jar"`
+	Cwd           string            `yaml:"cwd"`
+	Shell         string            `yaml:"shell"`
+	Env           map[string]string `yaml:"env"`
+	EnvFile       string            `yaml:"env_file"`
+	Encoding      string            `yaml:"encoding"` // auto | utf-8 | cp1254
+	DependsOn     []string          `yaml:"depends_on"`
+	Ready         *Ready            `yaml:"ready"`
+	Restart       string            `yaml:"restart"` // no | on-failure | always
+	MaxRestarts   int               `yaml:"max_restarts"`
+	Autostart     bool              `yaml:"autostart"`
+	StopTimeout   time.Duration     `yaml:"stop_timeout"`
+	URL           string            `yaml:"url"`
+	Changes       *bool             `yaml:"changes"`        // false: leave this project out of the Changes view (default: shown)
+	ChangesIgnore StringList        `yaml:"changes_ignore"` // paths (gitignore-like patterns, relative to cwd) left out of the Changes view; git is not touched
+	Color         *bool             `yaml:"color"`
+	Runtime       StringList        `yaml:"runtime"` // names from the top-level `runtimes`
 
 	ReadyRegexp *regexp.Regexp `yaml:"-"`
 }

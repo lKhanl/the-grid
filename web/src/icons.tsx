@@ -41,6 +41,15 @@ export const RestartIcon = ({ size }: P) => (
   </Svg>
 )
 
+export const RefreshIcon = ({ size }: P) => (
+  <Svg size={size}>
+    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+    <path d="M21 3v5h-5" />
+    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+    <path d="M8 16H3v5" />
+  </Svg>
+)
+
 export const ReloadIcon = ({ size }: P) => (
   <Svg size={size}>
     <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
@@ -232,6 +241,34 @@ export const ChevronIcon = ({ size }: P) => (
 export const ChevronDownIcon = ({ size }: P) => (
   <Svg size={size}>
     <path d="M6 9l6 6 6-6" />
+  </Svg>
+)
+
+// panel size: arrows out to the corners / back in
+export const MaximizeIcon = ({ size }: P) => (
+  <Svg size={size}>
+    <path d="M15 3h6v6" />
+    <path d="M9 21H3v-6" />
+    <path d="M21 3l-7 7" />
+    <path d="M3 21l7-7" />
+  </Svg>
+)
+
+export const RestoreIcon = ({ size }: P) => (
+  <Svg size={size}>
+    <path d="M4 14h6v6" />
+    <path d="M20 10h-6V4" />
+    <path d="M14 10l7-7" />
+    <path d="M3 21l7-7" />
+  </Svg>
+)
+
+// hide the bottom panel: a window with its bottom part and an arrow pointing down
+export const PanelHideIcon = ({ size }: P) => (
+  <Svg size={size}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M3 15h18" />
+    <path d="M9 8l3 3 3-3" />
   </Svg>
 )
 

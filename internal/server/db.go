@@ -80,6 +80,15 @@ func dbRoutes(mux *http.ServeMux, dbm *db.Manager) {
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	})
+	// re-read connections.json after it was edited outside the Grid
+	mux.HandleFunc("POST /api/dbconn/reload", func(w http.ResponseWriter, r *http.Request) {
+		added, removed, changed, err := dbm.Reload()
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"added": added, "removed": removed, "changed": changed, "total": len(dbm.Store.List())})
+	})
 	mux.HandleFunc("POST /api/dbconn/test", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			db.Conn

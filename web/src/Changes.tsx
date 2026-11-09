@@ -1,7 +1,8 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isYaml, langOf, tokenize, tokenizeMarkup, tokenizeYaml, type Tok } from './highlight'
-import { gitChanges, gitDiff, type GitDiff, type GitFile, type GitProject } from './api'
-import { ChevronIcon, FolderIcon, ReloadIcon } from './icons'
+import { changesIgnore, gitChanges, gitDiff, type GitDiff, type GitFile, type GitProject } from './api'
+import { ContextMenu, type MenuEntry } from './ContextMenu'
+import { ChevronIcon, FolderIcon, RefreshIcon } from './icons'
 
 // ---- state shared by the sidebar tree and the diff pane ----
 
@@ -151,29 +152,101 @@ function useCollapsed() {
   return [set, toggle] as const
 }
 
+type Menu = { x: number; y: number; title: string; items: MenuEntry[] }
+
 export function ChangesList({ git, typeIcon }: { git: GitState; typeIcon: (type: string) => ReactNode }) {
   const [collapsed, toggle] = useCollapsed()
+  // files hidden by changes_ignore: counted in the header, shown dimmed on demand
+  const [showIgnored, setShowIgnored] = useState(() => localStorage.getItem('grid.git.showIgnored') === '1')
+  const [menu, setMenu] = useState<Menu | null>(null)
+  const [actionErr, setActionErr] = useState<string | null>(null)
+  const hiddenCount = git.projects.reduce((n, p) => n + (p.ignored?.length ?? 0), 0)
+  const flipIgnored = () =>
+    setShowIgnored((v) => {
+      localStorage.setItem('grid.git.showIgnored', v ? '0' : '1')
+      return !v
+    })
+
+  // patterns live in grid.yaml under the project's services (the first one gets new ones)
+  const hide = (p: GitProject, pattern: string) =>
+    changesIgnore(p.services[0], pattern, true).then(
+      () => {
+        setActionErr(null)
+        git.refresh()
+      },
+      (e: Error) => setActionErr(e.message),
+    )
+  const unhide = async (p: GitProject, pattern: string) => {
+    let last: Error | null = null
+    for (const s of p.services) {
+      try {
+        await changesIgnore(s, pattern, false)
+        setActionErr(null)
+        git.refresh()
+        return
+      } catch (e) {
+        last = e as Error
+      }
+    }
+    setActionErr(last?.message ?? 'pattern not found')
+  }
+  const fileMenu = (e: React.MouseEvent, p: GitProject, f: GitFile, rel: string, pattern?: string) => {
+    e.preventDefault()
+    if (!p.services.length) return // "(other files)": no service to keep the pattern
+    const name = rel.slice(rel.lastIndexOf('/') + 1)
+    const dot = name.lastIndexOf('.')
+    const ext = dot > 0 ? name.slice(dot) : ''
+    const items: MenuEntry[] = pattern
+      ? [{ label: 'Show in Changes again', hint: pattern, onSelect: () => void unhide(p, pattern) }]
+      : [
+          { label: 'Hide from Changes', hint: rel, onSelect: () => void hide(p, rel) },
+          ...(ext ? [{ label: `Hide all ${ext} files`, hint: `*${ext}`, onSelect: () => void hide(p, `*${ext}`) }] : []),
+        ]
+    setMenu({ x: e.clientX, y: e.clientY, title: f.path, items })
+  }
+  const dirMenu = (e: React.MouseEvent, p: GitProject, rel: string) => {
+    e.preventDefault()
+    if (!p.services.length) return
+    setMenu({ x: e.clientX, y: e.clientY, title: rel + '/', items: [{ label: 'Hide folder from Changes', hint: rel + '/', onSelect: () => void hide(p, rel + '/') }] })
+  }
+
   return (
     <>
       <div className="sidebar-head divided">
         <span>Changes{git.total ? ` · ${git.total}` : ''}</span>
-        <button className={`icon-btn ${git.loading ? 'spin' : ''}`} title="Refresh" onClick={git.refresh}>
-          <ReloadIcon size={14} />
-        </button>
+        <span className="head-actions">
+          {hiddenCount > 0 && (
+            <button
+              className={`btn text small git-hidden-btn ${showIgnored ? 'on' : ''}`}
+              title={showIgnored ? 'Hide them again' : 'Files left out by "Hide from Changes" patterns: show them dimmed'}
+              onClick={flipIgnored}
+            >
+              {hiddenCount} hidden
+            </button>
+          )}
+          <button className={`icon-btn ${git.loading ? 'spin' : ''}`} title="Refresh" onClick={git.refresh}>
+            <RefreshIcon size={14} />
+          </button>
+        </span>
       </div>
+      {actionErr && <div className="db-msg field-error">{actionErr}</div>}
       {git.error && <div className="empty">{git.error}</div>}
       {!git.error && git.total === 0 && <div className="empty">No local changes in any service.</div>}
+      {menu && <ContextMenu x={menu.x} y={menu.y} title={menu.title} items={menu.items} onClose={() => setMenu(null)} />}
       {git.projects.map((p) => {
+        const ignored = p.ignored ?? []
+        if (!p.files.length && !(showIgnored && ignored.length)) return null
+        const patternOf = new Map(ignored.map((f) => [f.path, f.pattern]))
         const add = p.files.reduce((n, f) => n + f.additions, 0)
         const del = p.files.reduce((n, f) => n + f.deletions, 0)
         const closed = collapsed.has(p.key)
-        const tree = buildTree(p.files, p.prefix)
+        const tree = buildTree(showIgnored ? [...p.files, ...ignored] : p.files, p.prefix)
         const renderDir = (d: DirNode, depth: number): ReactNode => {
           const key = p.key + '/' + d.path
           const shut = collapsed.has(key)
           return (
             <div key={key}>
-              <div className="git-row git-dir" style={{ paddingLeft: 14 + depth * 14 }} onClick={() => toggle(key)}>
+              <div className="git-row git-dir" style={{ paddingLeft: 14 + depth * 14 }} onClick={() => toggle(key)} onContextMenu={(e) => dirMenu(e, p, d.path)}>
                 <span className={`group-chevron ${shut ? '' : 'open'}`}><ChevronIcon size={12} /></span>
                 <FolderIcon size={14} />
                 <span className="git-name">
@@ -191,13 +264,16 @@ export function ChangesList({ git, typeIcon }: { git: GitState; typeIcon: (type:
             {n.files.map((f) => {
               const [, name] = split(f.path)
               const on = git.sel?.root === p.root && git.sel.path === f.path
+              const pattern = patternOf.get(f.path)
+              const rel = p.prefix ? f.path.slice(p.prefix.length + 1) : f.path
               return (
                 <div
                   key={f.path}
-                  className={`git-row git-file ${on ? 'on' : ''}`}
+                  className={`git-row git-file ${on ? 'on' : ''} ${pattern ? 'git-ignored' : ''}`}
                   style={{ paddingLeft: 14 + depth * 14 + 16 }}
                   onClick={() => git.setSel({ root: p.root, path: f.path })}
-                  title={`${STATUS_TITLE[f.status]}${f.staged ? ' · staged' : ''}\n${f.path}`}
+                  onContextMenu={(e) => fileMenu(e, p, f, rel, pattern)}
+                  title={`${STATUS_TITLE[f.status]}${f.staged ? ' · staged' : ''}\n${f.path}${pattern ? `\nHidden by "${pattern}" (right-click to show it again)` : p.services.length ? '\nRight-click: hide from Changes' : ''}`}
                 >
                   <span className={`git-status st-${f.status}`}>{f.status}</span>
                   <span className="git-name">

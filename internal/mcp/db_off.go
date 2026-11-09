@@ -8,4 +8,6 @@ const dbInstructions = ""
 
 var dbTools []map[string]any
 
+func (s *Server) dbReload() string { return "" }
+
 func (s *Server) callDB(string, map[string]any) (string, bool, error) { return "", false, nil }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { dbDescribe, dbSchemas, dbTables, quoteName, type DbView, type TableInfo, type TableRef } from './dbApi'
 import { message, where, type DbState } from './dbState'
-import { ChevronDownIcon, ChevronIcon, EditIcon, PlusIcon, ReloadIcon, TrashIcon } from './icons'
+import { Btn } from './ui'
+import { ChevronDownIcon, ChevronIcon, EditIcon, PlusIcon, RefreshIcon, TrashIcon } from './icons'
 
 // Database sidebar: connections and the schema tree.
 
@@ -14,18 +15,22 @@ function useDebounced<T>(value: T, ms: number): T {
   return v
 }
 
+const aiAccess = {
+  readonly: 'AI agents (MCP): read-only, SELECT queries only',
+  readwrite: 'AI agents (MCP): may read and change data',
+  off: 'Not shared with AI agents',
+}
+
 export function DbSidebar({ dbs }: { dbs: DbState }) {
   return (
     <>
       <div className="sidebar-head divided">
         <span>Database</span>
         <span className="head-actions">
-          <button className={`icon-btn ${dbs.loading ? 'spin' : ''}`} title="Refresh" onClick={dbs.reload}>
-            <ReloadIcon size={14} />
+          <button className={`icon-btn ${dbs.loading ? 'spin' : ''}`} title="Refresh (also re-reads connections.json)" onClick={dbs.refresh}>
+            <RefreshIcon size={14} />
           </button>
-          <button className="icon-btn" title="New connection" onClick={() => dbs.openForm(null)}>
-            <PlusIcon size={15} />
-          </button>
+          <Btn icon={<PlusIcon size={14} />} label="New" title="New connection (Oracle / PostgreSQL)" kind="text small" onClick={() => dbs.openForm(null)} />
         </span>
       </div>
       {dbs.error && <div className="db-msg field-error">{dbs.error}</div>}
@@ -39,10 +44,10 @@ export function DbSidebar({ dbs }: { dbs: DbState }) {
         </div>
       )}
       {dbs.conns.map((c) => (
-        <div key={c.name} className={`row ${c.name === dbs.current?.name ? 'selected' : ''}`} onClick={() => dbs.select(c.name)} title={`${c.user}@${where(c)}`}>
+        <div key={c.name} className={`row db-conn ${c.name === dbs.current?.name ? 'selected' : ''}`} onClick={() => dbs.select(c.name)} title={`${c.user}@${where(c)}\n${aiAccess[c.mcp] ?? aiAccess.readonly}`}>
           <span className={`db-dot ${c.connected ? 'on' : ''} ${c.inTx ? 'tx' : ''}`} title={c.inTx ? 'Uncommitted changes' : c.connected ? 'Connected' : 'Not connected'} />
           <span className="name">{c.name}</span>
-          <span className="meta">{c.mcp === 'off' ? '' : c.mcp === 'readwrite' ? 'AI rw' : 'AI ro'}</span>
+          <span className="meta">{c.mcp === 'off' ? '' : c.mcp === 'readwrite' ? 'AI: write' : 'AI: read'}</span>
           <span className="row-actions">
             <button
               className="icon-btn"
@@ -128,6 +133,8 @@ function SchemaTree({ dbs, conn }: { dbs: DbState; conn: DbView }) {
   }, [conn.name, schema, dq])
 
   const key = (t: TableRef) => `${t.schema}.${t.name}`
+  const insertSelect = (t: TableRef) =>
+    dbs.insertSql(`SELECT * FROM ${quoteName(t.schema, conn.kind)}.${quoteName(t.name, conn.kind)};`)
   const toggle = (t: TableRef) => {
     const k = key(t)
     if (open[k]) {
@@ -164,13 +171,24 @@ function SchemaTree({ dbs, conn }: { dbs: DbState; conn: DbView }) {
           <div key={k}>
             <div
               className="db-table"
-              title={`${t.type.toLowerCase()}${t.comment ? ` — ${t.comment}` : ''}\nClick: columns · Double-click: SELECT *`}
-              onClick={() => toggle(t)}
-              onDoubleClick={() => dbs.insertSql(`SELECT * FROM ${quoteName(t.schema, conn.kind)}.${quoteName(t.name, conn.kind)};`)}
+              title={`${t.type.toLowerCase()}${t.comment ? ` — ${t.comment}` : ''}\nClick: columns · SELECT button: SELECT * into the editor`}
+              onClick={(e) => {
+                if (e.detail === 1) toggle(t) // a fast second click does not close it again
+              }}
             >
               {info ? <ChevronDownIcon size={13} /> : <ChevronIcon size={13} />}
               <span className="name">{t.name}</span>
-              {t.type !== 'TABLE' && <span className="muted small">{t.type === 'VIEW' ? 'view' : 'mview'}</span>}
+              {t.type !== 'TABLE' && <span className="muted small db-kind">{t.type === 'VIEW' ? 'view' : 'mview'}</span>}
+              <button
+                className="db-select-btn"
+                title="Insert SELECT * into the editor"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  insertSelect(t)
+                }}
+              >
+                SELECT
+              </button>
             </div>
             {info === 'loading' && <div className="db-col muted">Loading…</div>}
             {info && typeof info === 'object' && 'error' in info && <div className="db-col field-error">{info.error}</div>}

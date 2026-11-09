@@ -32,7 +32,7 @@ need 3–4 APIs, UIs and scripts running side by side with their logs one click 
 - Add / edit / delete services and runtimes from the UI (writes `grid.yaml`, keeps comments)
 - Several JDKs / Node versions side by side (`runtimes`), one per service
 - **Changes** view: read-only git diff per service (files as a tree, side-by-side or unified, syntax coloured) to review what an AI agent wrote
-- Live colored logs (xterm.js), filter, 1k-10k lines per service (Settings → Logs, default 5k)
+- Live colored logs (xterm.js), filter, 1k-10k lines per service (Settings → Logs, default 1k)
 - Logs also go to files (`~/.grid/logs`, can be turned off), at most 10 MB per service, so they survive a restart of the Grid
 - CPU and memory of each running service (its whole process tree), in the toolbar and over MCP
 - **Terminals** in the same window (``Ctrl+` ``): real shells (cmd, PowerShell, Git Bash, bash, zsh…) opened in the
@@ -247,6 +247,7 @@ See [`grid.example.yaml`](grid.example.yaml) for every option.
 | `restart`, `max_restarts` | `no` / `on-failure` / `always` |
 | `autostart` | start when the runner starts |
 | `changes` | `false` keeps this service's project out of the **Changes** view (form: *Show this project in Changes*). Services sharing a working directory are one project, so `false` on any of them hides it |
+| `changes_ignore` | paths left out of the **Changes** view without touching git (tracked files too), relative to `cwd`: `*.iml` (any depth), `tmp/` (a folder), `src/app-local.yml`, `**/gen/*.java`. Right-click a file or folder in Changes → *Hide from Changes* adds one; the header shows how many are hidden and can show them dimmed |
 | `encoding` | `auto` (default), `utf-8`, `cp1254` |
 | `url` | link shown in the UI |
 | `stop_timeout` | grace period before kill (Unix), default `10s` |

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { dbCancel, dbCommit, dbDelete, dbDisconnect, dbList, dbRollback, dbRun, type DbConn, type DbResult, type DbView } from './dbApi'
+import { dbCancel, dbCommit, dbDelete, dbDisconnect, dbList, dbReloadFile, dbRollback, dbRun, type DbConn, type DbResult, type DbView } from './dbApi'
 import { splitSql } from './sqlSplit'
 
 // State shared by the Database sidebar and the workbench.
@@ -25,6 +25,8 @@ export interface DbState {
   current: DbView | null
   select: (name: string) => void
   reload: () => void
+  /** the Refresh button: re-read the connections file, then the list */
+  refresh: () => void
   loading: boolean
   error: string | null
   setError: (e: string | null) => void
@@ -97,6 +99,14 @@ export function useDatabase(active: boolean): DbState {
       },
     )
   }, [])
+  const refresh = useCallback(() => {
+    setLoading(true)
+    // a broken file is reported and the list stays as it was (the server keeps the old connections)
+    dbReloadFile().then(reload, (e) => {
+      setError(message(e))
+      setLoading(false)
+    })
+  }, [reload])
   useEffect(() => {
     if (active) reload()
   }, [active, reload])
@@ -165,6 +175,7 @@ export function useDatabase(active: boolean): DbState {
     current,
     select: setSelected,
     reload,
+    refresh,
     loading,
     error,
     setError,

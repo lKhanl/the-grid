@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { act, reload, reorderServices, LogStore, type Action, type Info, type RunnerEvent, type State } from './api'
 import { LogView } from './LogView'
-import { GridIcon, PlayIcon, ReloadIcon, StopIcon } from './icons'
+import { ChevronDownIcon, FolderIcon, GridIcon, PlayIcon, ReloadIcon, StopIcon } from './icons'
+import { recordStats } from './stats'
 import { ServiceForm } from './ServiceForm'
 import { RuntimeForm } from './RuntimeForm'
 import { Workspaces } from './Workspaces'
@@ -28,7 +29,7 @@ export default function App() {
   const [state, setState] = useState<State | null>(null)
   const [selected, setSelected] = useState<string | null>(() => localStorage.getItem('grid.selected'))
   const [filter, setFilter] = useState('')
-  const logLines = state?.logLines ?? 5000
+  const logLines = state?.logLines ?? 1000
   store.setMax(logLines) // cheap no-op unless the setting changed
   const nameKey = state?.services.map((s) => s.name).join('\n') ?? ''
   const serviceNames = useMemo(() => (nameKey ? nameKey.split('\n') : []), [nameKey])
@@ -144,6 +145,7 @@ export default function App() {
       const ev: RunnerEvent = JSON.parse(msg.data)
       if (ev.type === 'snapshot' && ev.state) {
         const st = ev.state
+        st.services.forEach(recordStats)
         setState(st)
         setSelected((cur) => (cur && st.services.some((s) => s.name === cur) ? cur : (st.services[0]?.name ?? null)))
         // The first snapshot of a connection carries the log history; later
@@ -155,6 +157,7 @@ export default function App() {
         onServerList(ev.terms ?? [], false)
       } else if (ev.type === 'service' && ev.info) {
         const info = ev.info
+        recordStats(info)
         setState((st) => st && { ...st, services: st.services.map((s) => (s.name === info.name ? info : s)) })
       } else if (ev.type === 'log' && ev.service && ev.entry) {
         store.append(ev.service, ev.entry)
@@ -271,13 +274,10 @@ export default function App() {
             </span>
           )}
           {state && (
-            <button
-              className="workspace"
-              style={{ background: 'none', border: 0, borderLeft: '1px solid var(--border)', cursor: 'pointer' }}
-              title={`${state.configPath}\nSwitch workspace`}
-              onClick={() => setWsOpen(true)}
-            >
-              {state.configPath === '' ? 'Open workspace' : state.name || 'workspace'} ▾
+            <button className={`workspace ${wsOpen ? 'on' : ''}`} title={`${state.configPath}\nSwitch workspace`} onClick={() => setWsOpen(true)}>
+              <FolderIcon size={15} />
+              <span className="workspace-name">{state.configPath === '' ? 'Open workspace' : state.name || 'workspace'}</span>
+              <ChevronDownIcon size={14} />
             </button>
           )}
         </div>

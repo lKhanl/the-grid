@@ -308,3 +308,34 @@ func TestFilterLinesSeparatorsOnlyWithContext(t *testing.T) {
 		t.Fatalf("must not start with a separator: %v", out)
 	}
 }
+
+func TestReloadReportsWhatChanged(t *testing.T) {
+	reloaded := false
+	g := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/reload":
+			reloaded = true
+			json.NewEncoder(w).Encode(map[string]any{
+				"services": []map[string]any{{"name": "api"}, {"name": "web"}},
+				"runtimes": []map[string]any{{"name": "java-21"}, {"name": "node-9", "error": "home not found"}},
+			})
+		case r.URL.Path == "/api/state":
+			json.NewEncoder(w).Encode(map[string]any{"services": []map[string]any{{"name": "api"}, {"name": "old"}}})
+		default: // a Grid built without the database module
+			http.NotFound(w, r)
+		}
+	}))
+	defer g.Close()
+	s := New(0, "test")
+	s.Base = g.URL
+	res := run(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"reload","arguments":{}}}`)
+	got := text(res[0])
+	for _, want := range []string{"2 services, 2 runtimes", "added: web", "removed (stopped): old", "runtime node-9: home not found"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in %q", want, got)
+		}
+	}
+	if !reloaded {
+		t.Fatal("did not ask the Grid to reload")
+	}
+}

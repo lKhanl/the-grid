@@ -103,6 +103,16 @@ func (m *Manager) get(name string) (*pool, error) {
 	return p, nil
 }
 
+// Reload re-reads the saved connections and closes the open ones that were changed or removed
+// (their next use connects with the new settings).
+func (m *Manager) Reload() (added, removed, changed []string, err error) {
+	added, removed, changed, err = m.Store.Reload()
+	for _, name := range append(append([]string(nil), removed...), changed...) {
+		m.Forget(name)
+	}
+	return added, removed, changed, err
+}
+
 // Forget closes the open connection called name (after it was edited or deleted).
 func (m *Manager) Forget(name string) {
 	m.mu.Lock()

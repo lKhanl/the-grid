@@ -1,7 +1,8 @@
 import type { RefObject } from 'react'
 import type { Action, Info, State } from './api'
 import { ClearIcon, EditIcon, ExternalIcon, HammerIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } from './icons'
-import { ACTIVE, Btn, formatBytes, StatusIcon, statusLabel, uptime } from './ui'
+import { ServiceStats } from './ServiceStats'
+import { ACTIVE, Btn, StatusIcon, statusLabel, uptime } from './ui'
 
 interface Props {
   current: Info | null
@@ -29,13 +30,7 @@ export function ServiceHeader({ current, state, run, onEdit, filter, setFilter, 
             </span>
           ) : null}
           {current.restarts > 0 && <span className="muted">restarts {current.restarts}</span>}
-          {(current.cpu !== undefined || current.mem) && (
-            <span className="muted" title="CPU (one core = 100%) and memory of the service's process tree">
-              {current.cpu !== undefined && <>cpu {Math.round(current.cpu)}%</>}
-              {current.cpu !== undefined && current.mem ? ' · ' : ''}
-              {current.mem ? formatBytes(current.mem) : ''}
-            </span>
-          )}
+          <ServiceStats current={current} />
           {current.url && (
             <a className="link" href={current.url} target="_blank" rel="noreferrer">
               {current.url} <ExternalIcon size={13} />

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Action, Info, State } from './api'
 import { ChevronIcon, EditIcon, PlayIcon, PlusIcon, RestartIcon, StopIcon } from './icons'
+import { shortStats } from './ServiceStats'
 import { ACTIVE, Btn, StatusIcon, statusLabel, uptime } from './ui'
 
 interface Props {
@@ -160,9 +161,9 @@ export function ServiceList({ state, groups, collapsed, toggleGroup, selected, s
                 <StatusIcon status={s.status} type={s.type} />
                 <span className="name">{s.name}</span>
                 {unread[s.name] && <span className={`unread unread-${unread[s.name]}`} />}
-                <span className="meta">
+                <span className={`meta ${s.status === 'running' && shortStats(s) ? 'meta-stats' : ''}`}>
                   {s.status === 'running'
-                    ? uptime(s.startedAt)
+                    ? shortStats(s) || uptime(s.startedAt)
                     : s.status === 'starting' || s.status === 'building'
                       ? `${s.status} ${s.startedAt ? uptime(s.startedAt) : '…'}`
                       : s.status === 'stopped'

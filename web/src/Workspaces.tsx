@@ -65,14 +65,14 @@ export function Workspaces({ current, required, onClose, onSwitched }: Props) {
         <div className="picker-list">
           {recent.length === 0 && <div className="muted picker-msg">No workspace is open yet. Open a workspace file below.</div>}
           {recent.map((w) => (
-            <div key={w.path} className="picker-row" style={{ cursor: 'pointer' }} onClick={() => !busy && open(w.path)}>
+            <div key={w.path} className="picker-row ws-row" onClick={() => !busy && open(w.path)}>
               <span className="rt-icon picker-folder">
                 <FolderIcon size={17} />
               </span>
               <span className="name" title={w.path}>
                 {w.name || w.path}
                 {w.path === current && <span className="muted small"> · open</span>}
-                <div className="muted small mono" style={{ fontWeight: 400 }}>
+                <div className="muted small mono ws-path">
                   {w.path}
                 </div>
               </span>
@@ -95,7 +95,8 @@ export function Workspaces({ current, required, onClose, onSwitched }: Props) {
         <div className="picker-bar">
           <input
             className="mono"
-            placeholder="path to a workspace .yml / .yaml file (or a folder with grid.yaml)"
+            placeholder="path to a .yml file or its folder"
+            title="Path to a workspace .yml / .yaml file, or a folder that has grid.yaml"
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && typed.trim() && !busy && open(typed.trim())}

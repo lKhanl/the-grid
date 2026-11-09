@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { Annotation, EditorState, Transaction } from '@codemirror/state'
-import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, placeholder } from '@codemirror/view'
+import { Annotation, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
+import { Decoration, type DecorationSet, drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, placeholder } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { bracketMatching, HighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/language'
 import { PLSQL, PostgreSQL, sql } from '@codemirror/lang-sql'
@@ -46,7 +46,7 @@ const theme = EditorView.theme(
   {
     '&': { height: '100%', backgroundColor: 'var(--bg)', color: 'var(--text)', fontSize: '13px' },
     '&.cm-focused': { outline: 'none' },
-    '.cm-scroller': { fontFamily: "'JetBrains Mono', Consolas, Menlo, monospace", lineHeight: '1.55', overflow: 'auto' },
+    '.cm-scroller': { fontFamily: "'JetBrains Mono', Consolas, Menlo, monospace", lineHeight: '1.8', overflow: 'auto' },
     '.cm-content': { caretColor: 'var(--text)', padding: '10px 0' },
     '.cm-line': { padding: '0 14px 0 6px' },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text)' },
@@ -64,12 +64,36 @@ const theme = EditorView.theme(
     '.cm-completionDetail': { color: 'var(--muted)', marginLeft: '12px', fontStyle: 'normal' },
     '.cm-completionMatchedText': { color: 'var(--accent)', textDecoration: 'none', fontWeight: '600' },
     '.cm-completionInfo': { padding: '4px 8px', maxWidth: '320px', whiteSpace: 'normal' },
+    '.cm-inserted': { animation: 'cm-inserted 1.4s ease-out' },
   },
   { dark: true },
 )
 
 // text that is put into the editor from outside (a SELECT from the tree) is marked, and is no undo step
 const external = Annotation.define<boolean>()
+
+// a short highlight on the lines that were just inserted from outside, so the user sees where they went
+const flash = StateEffect.define<{ from: number; to: number } | null>()
+const flashLine = Decoration.line({ class: 'cm-inserted' })
+const flashField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes)
+    for (const e of tr.effects) {
+      if (!e.is(flash)) continue
+      if (!e.value) return Decoration.none
+      const lines = []
+      for (let pos = e.value.from; pos <= e.value.to; ) {
+        const line = tr.state.doc.lineAt(pos)
+        lines.push(flashLine.range(line.from))
+        pos = line.to + 1
+      }
+      deco = Decoration.set(lines)
+    }
+    return deco
+  },
+  provide: (f) => EditorView.decorations.from(f),
+})
 
 export function SqlEditor({ value, rev, onChange, onRun, handle, placeholderText, connection, kind }: Props) {
   const host = useRef<HTMLDivElement>(null)
@@ -117,6 +141,7 @@ export function SqlEditor({ value, rev, onChange, onRun, handle, placeholderText
           syntaxHighlighting(highlight),
           placeholder(placeholderText),
           theme,
+          flashField,
           keymap.of([
             {
               key: 'Mod-Enter', // Cmd on a Mac, Ctrl elsewhere
@@ -172,14 +197,25 @@ export function SqlEditor({ value, rev, onChange, onRun, handle, placeholderText
     if (lastRev.current === rev) return
     lastRev.current = rev
     const v = view.current
-    if (!v || v.state.doc.toString() === value) return
+    const old = v?.state.doc.toString()
+    if (!v || old === value) return
+    // what was added: everything after the part the old and new text share (skipping the blank separator lines)
+    let from = 0
+    while (from < old!.length && from < value.length && old![from] === value[from]) from++
+    while (from < value.length && /\s/.test(value[from])) from++
     v.dispatch({
       changes: { from: 0, to: v.state.doc.length, insert: value },
       selection: { anchor: value.length },
-      scrollIntoView: true,
+      effects: [flash.of(from < value.length ? { from, to: value.length } : null), EditorView.scrollIntoView(value.length, { y: 'center' })],
       annotations: [external.of(true), Transaction.addToHistory.of(false)],
     })
+    v.focus()
+    // a ref, not an effect cleanup: value changes on every keystroke and must not cancel this
+    window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => view.current?.dispatch({ effects: flash.of(null) }), 1500)
   }, [rev, value])
+  const flashTimer = useRef(0)
+  useEffect(() => () => window.clearTimeout(flashTimer.current), [])
 
   return <div className="sql-editor" ref={host} />
 }
