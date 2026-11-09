@@ -31,26 +31,41 @@ export function useGit(active: boolean): GitState {
   const [loading, setLoading] = useState(false)
 
   const busy = useRef(false)
-  // `quiet` = the automatic poll: no spinner, and never a second request while one is still running
+  const again = useRef(false)
+  // `quiet` = the automatic poll: no spinner, and never a second request while one is still running.
+  // An asked-for refresh (the button, after hiding a file) that arrives meanwhile is not dropped:
+  // the answer on its way may be older than the change, so one more request follows it.
   const load = useCallback((quiet: boolean): Promise<void> => {
-    if (busy.current) return Promise.resolve()
+    if (busy.current) {
+      if (!quiet) {
+        again.current = true
+        setLoading(true)
+      }
+      return Promise.resolve()
+    }
     busy.current = true
     if (!quiet) setLoading(true)
-    return gitChanges()
-      .then(({ projects, error }) => {
-        setProjects(projects)
-        setError(projects.length ? null : error || null)
-        setSel((cur) => {
-          const all = projects.flatMap((p) => p.files.map((f) => ({ root: p.root, path: f.path })))
-          if (cur && all.some((x) => same(x, cur))) return cur
-          return all[0] ?? null
+    const run = (): Promise<void> =>
+      gitChanges()
+        .then(({ projects, error }) => {
+          setProjects(projects)
+          setError(projects.length ? null : error || null)
+          setSel((cur) => {
+            const all = projects.flatMap((p) => p.files.map((f) => ({ root: p.root, path: f.path })))
+            if (cur && all.some((x) => same(x, cur))) return cur
+            return all[0] ?? null
+          })
         })
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => {
-        busy.current = false
-        setLoading(false)
-      })
+        .catch((e: Error) => setError(e.message))
+        .then(() => {
+          if (again.current) {
+            again.current = false
+            return run()
+          }
+          busy.current = false
+          setLoading(false)
+        })
+    return run()
   }, [])
   const refresh = useCallback(() => void load(false), [load])
 
@@ -160,7 +175,7 @@ export function ChangesList({ git, typeIcon }: { git: GitState; typeIcon: (type:
   const [showIgnored, setShowIgnored] = useState(() => localStorage.getItem('grid.git.showIgnored') === '1')
   const [menu, setMenu] = useState<Menu | null>(null)
   const [actionErr, setActionErr] = useState<string | null>(null)
-  const hiddenCount = git.projects.reduce((n, p) => n + (p.ignored?.length ?? 0), 0)
+  const hiddenCount = git.projects.reduce((n, p) => n + (p.ignored?.length ?? 0) + (p.ignoredMore ?? 0), 0)
   const flipIgnored = () =>
     setShowIgnored((v) => {
       localStorage.setItem('grid.git.showIgnored', v ? '0' : '1')
@@ -314,6 +329,11 @@ export function ChangesList({ git, typeIcon }: { git: GitState; typeIcon: (type:
               <span className="git-count">{p.files.length}</span>
             </div>
             {!closed && renderBody(tree, 1)}
+            {!closed && !!p.more && (
+              <div className="git-more" title="Listing and reading that many files would slow the Grid down. Add the folder to .gitignore, or right-click it and hide it from Changes.">
+                {p.more.toLocaleString()} more untracked files are not listed. A folder such as node_modules or target is probably missing from .gitignore.
+              </div>
+            )}
           </div>
         )
       })}

@@ -13,14 +13,19 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	emptyTree  = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-	maxDiff    = 2 << 20 // bytes of diff text sent to the UI
-	maxCount   = 2 << 20 // untracked files bigger than this are not line-counted
-	gitTimeout = 20 * time.Second
+	emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+	maxDiff   = 2 << 20 // bytes of diff text sent to the UI
+	maxCount  = 2 << 20 // untracked files bigger than this are not line-counted
+	// countBudget is how many bytes one CountUntracked call reads from files it has not
+	// counted yet; the rest is counted by the next calls (the view refreshes every few seconds)
+	countBudget = 32 << 20
+	maxCounts   = 20000 // remembered line counts
+	gitTimeout  = 20 * time.Second
 )
 
 // File is one changed file.
@@ -112,6 +117,8 @@ func base(root string) string {
 }
 
 // Status lists every changed file (staged, unstaged and untracked) against HEAD.
+// Untracked files come without their line count: git does not give it and reading
+// every one of them is expensive, see CountUntracked.
 func Status(root string) (Changes, error) {
 	res := Changes{Branch: Branch(root), Files: []File{}}
 	out, err := git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames")
@@ -157,13 +164,62 @@ func Status(root string) (Changes, error) {
 		}
 	}
 	for _, f := range byPath {
-		if f.Status == "U" {
-			f.Additions, f.Binary = countLines(filepath.Join(root, filepath.FromSlash(f.Path)))
-		}
 		res.Files = append(res.Files, *f)
 	}
 	sort.Slice(res.Files, func(i, j int) bool { return res.Files[i].Path < res.Files[j].Path })
 	return res, nil
+}
+
+// lineCount is what was counted in an untracked file, and the size and time it had then.
+type lineCount struct {
+	size   int64
+	mod    time.Time
+	lines  int
+	binary bool
+}
+
+var counts = struct {
+	sync.Mutex
+	m map[string]lineCount
+}{m: map[string]lineCount{}}
+
+// CountUntracked fills in the line count (Additions) and Binary of the untracked files
+// in files, which must be the ones that are going to be shown: a repository where
+// node_modules or target is not ignored has tens of thousands of them.
+//
+// A file is read once and again only after it changed. One call reads at most
+// countBudget bytes; files beyond that keep Additions 0 until a later call.
+func CountUntracked(root string, files []File) {
+	budget := int64(countBudget)
+	for i := range files {
+		f := &files[i]
+		if f.Status != "U" {
+			continue
+		}
+		path := filepath.Join(root, filepath.FromSlash(f.Path))
+		st, err := os.Stat(path)
+		if err != nil || st.IsDir() || st.Size() > maxCount {
+			continue
+		}
+		counts.Lock()
+		c, ok := counts.m[path]
+		counts.Unlock()
+		if !ok || c.size != st.Size() || !c.mod.Equal(st.ModTime()) {
+			if st.Size() > budget {
+				continue
+			}
+			budget -= st.Size()
+			c = lineCount{size: st.Size(), mod: st.ModTime()}
+			c.lines, c.binary = countLines(path)
+			counts.Lock()
+			if len(counts.m) >= maxCounts {
+				counts.m = map[string]lineCount{}
+			}
+			counts.m[path] = c
+			counts.Unlock()
+		}
+		f.Additions, f.Binary = c.lines, c.binary
+	}
 }
 
 func countLines(path string) (lines int, binary bool) {

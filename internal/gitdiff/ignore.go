@@ -61,7 +61,7 @@ func (ig *Ignore) Match(rel string) string {
 				last--
 			}
 			for _, s := range segs[:max(last, 0)] {
-				if ok, _ := path.Match(p.segs[0], s); ok {
+				if matchName(p.segs[0], s) {
 					return p.raw
 				}
 			}
@@ -91,11 +91,22 @@ func matchSegs(pat, segs []string, dirOnly bool) bool {
 	if len(segs) == 0 {
 		return false
 	}
-	if ok, _ := path.Match(pat[0], segs[0]); !ok {
+	if !matchName(pat[0], segs[0]) {
 		return false
 	}
 	if len(pat) == 1 {
 		return !dirOnly || len(segs) > 1
 	}
 	return matchSegs(pat[1:], segs[1:], dirOnly)
+}
+
+// matchName matches one file or folder name. The name itself always matches: "Hide from
+// Changes" stores the path as it is, and a name such as [id] (a Next.js route folder) read
+// as a pattern is a character class that does not match its own text.
+func matchName(pat, name string) bool {
+	if pat == name {
+		return true
+	}
+	ok, _ := path.Match(pat, name)
+	return ok
 }

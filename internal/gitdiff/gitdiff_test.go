@@ -1,7 +1,9 @@
 package gitdiff
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,5 +74,63 @@ func TestFileDiffStopsWithItsRequest(t *testing.T) {
 	cancel()
 	if _, err := FileDiff(ctx, dir, "a.txt"); err == nil {
 		t.Fatal("a cancelled request must not run git")
+	}
+}
+
+func TestCountUntracked(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "a.txt"), []byte("1\n2\n3"), 0o644)
+	os.WriteFile(filepath.Join(root, "b.bin"), []byte{1, 0, 2}, 0o644)
+	files := []File{{Path: "a.txt", Status: "U"}, {Path: "b.bin", Status: "U"}, {Path: "a.txt", Status: "M", Additions: 7}, {Path: "gone.txt", Status: "U"}}
+	CountUntracked(root, files)
+	if files[0].Additions != 3 || files[0].Binary || !files[1].Binary || files[2].Additions != 7 || files[3].Additions != 0 {
+		t.Fatalf("got %+v", files)
+	}
+
+	// remembered: the file is not read again while its size and time stay the same
+	p := filepath.Join(root, "a.txt")
+	st, _ := os.Stat(p)
+	os.WriteFile(p, []byte("1\n2\nX"), 0o644) // same size, other content
+	os.Chtimes(p, st.ModTime(), st.ModTime())
+	again := []File{{Path: "a.txt", Status: "U"}}
+	CountUntracked(root, again)
+	if again[0].Additions != 3 {
+		t.Fatalf("unchanged file: got %d lines", again[0].Additions)
+	}
+	// ... and read again once it changed
+	os.WriteFile(p, []byte("1\n2\n3\n4\n"), 0o644)
+	CountUntracked(root, again)
+	if again[0].Additions != 4 {
+		t.Fatalf("changed file: got %d lines, want 4", again[0].Additions)
+	}
+}
+
+// One call reads a limited amount; the files it left out are counted by the next calls.
+func TestCountUntrackedBudget(t *testing.T) {
+	root := t.TempDir()
+	big := bytes.Repeat([]byte("x\n"), maxCount/2) // as large as a counted file gets
+	n := countBudget/maxCount + 3
+	var files []File
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("f%02d.txt", i)
+		os.WriteFile(filepath.Join(root, name), big, 0o644)
+		files = append(files, File{Path: name, Status: "U"})
+	}
+	counted := func() (c int) {
+		for i := range files {
+			if files[i].Additions > 0 {
+				c++
+			}
+			files[i].Additions = 0
+		}
+		return c
+	}
+	CountUntracked(root, files)
+	if c := counted(); c != countBudget/maxCount {
+		t.Fatalf("first call counted %d files, want %d", c, countBudget/maxCount)
+	}
+	CountUntracked(root, files)
+	if c := counted(); c != n {
+		t.Fatalf("second call: %d of %d files have a count", c, n)
 	}
 }

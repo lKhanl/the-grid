@@ -460,6 +460,8 @@ export interface GitProject {
   branch: string
   files: GitFile[]
   ignored: (GitFile & { pattern: string })[] // changed, but hidden by a changes_ignore pattern
+  more?: number // untracked files left out of files (the server lists 2000 per project)
+  ignoredMore?: number // the same for ignored
 }
 
 export interface GitDiff {

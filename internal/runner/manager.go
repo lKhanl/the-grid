@@ -90,6 +90,7 @@ type Manager struct {
 	Hub *Hub
 
 	logLines atomic.Int64 // read inside m.mu by newService, so not guarded by it
+	gen      atomic.Uint64
 	files    *fileLogs
 	statsOn  sync.Once
 
@@ -109,6 +110,10 @@ func NewManager(cfg *config.Config) *Manager {
 	}
 	return m
 }
+
+// Generation changes every time the config is reloaded or another workspace
+// is opened; callers that cache something derived from it compare the number.
+func (m *Manager) Generation() uint64 { return m.gen.Load() }
 
 // LogLines is how many log lines each service keeps.
 func (m *Manager) LogLines() int { return int(m.logLines.Load()) }
@@ -281,6 +286,7 @@ func (m *Manager) Reload() error {
 		removed = append(removed, s)
 	}
 	m.cfg = cfg
+	m.gen.Add(1)
 	m.mu.Unlock()
 	stopAll(removed)
 	st := m.State()
@@ -305,6 +311,7 @@ func (m *Manager) Switch(path string) error {
 		m.byName[sc.Name] = s
 	}
 	m.cfg = cfg
+	m.gen.Add(1)
 	m.mu.Unlock()
 	stopAll(old)
 	st := m.State()

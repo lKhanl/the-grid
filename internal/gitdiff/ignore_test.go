@@ -28,3 +28,21 @@ func TestIgnore(t *testing.T) {
 		t.Error("nil matcher matched")
 	}
 }
+
+// "Hide from Changes" stores the path as it is: a name with pattern characters must hide itself.
+func TestIgnoreNamesWithPatternCharacters(t *testing.T) {
+	ig := NewIgnore([]string{"src/app/[id]/page.tsx", "[slug]/", "notes[1].txt", "docs/what?.md"})
+	cases := map[string]string{
+		"src/app/[id]/page.tsx": "src/app/[id]/page.tsx",
+		"src/app/i/page.tsx":    "src/app/[id]/page.tsx", // still a pattern, as before
+		"x/[slug]/a.ts":         "[slug]/",
+		"notes[1].txt":          "notes[1].txt",
+		"docs/what?.md":         "docs/what?.md",
+		"src/app/[xy]/page.tsx": "",
+	}
+	for p, want := range cases {
+		if got := ig.Match(p); got != want {
+			t.Errorf("%s: got %q, want %q", p, got, want)
+		}
+	}
+}

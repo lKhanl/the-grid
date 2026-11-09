@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/lKhanl/the-grid/internal/config"
 	"github.com/lKhanl/the-grid/internal/runner"
@@ -153,5 +155,105 @@ func TestChangesThroughALinkedFolder(t *testing.T) {
 	json.Unmarshal([]byte(body), &r)
 	if len(r.Projects) != 1 || r.Projects[0].Name != "be" {
 		t.Fatalf("want the service's own project, got %s", body)
+	}
+}
+
+// A folder that git could not place (a timeout, or simply no repository yet) must not stay
+// out of Changes until the Grid restarts: it is asked again after repoRetry, and at once
+// after a reload.
+func TestChangesSeesARepositoryThatAppearsLater(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x\n"), 0o644)
+	cfgPath := filepath.Join(t.TempDir(), "grid.yaml")
+	os.WriteFile(cfgPath, []byte("services:\n  api:\n    cwd: "+dir+"\n    command: echo hi\n"), 0o644)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := runner.NewManager(cfg)
+	now := time.Now()
+	cache := newRepoCache()
+	cache.now = func() time.Time { return now }
+	count := func() int { p, _ := gitProjects(m, cache); return len(p) }
+
+	if n := count(); n != 0 {
+		t.Fatalf("no repository yet: got %d projects", n)
+	}
+	c := exec.Command("git", "init", "-q")
+	c.Dir = dir
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s", out)
+	}
+	if n := count(); n != 0 {
+		t.Fatalf("within repoRetry the answer is remembered: got %d projects", n)
+	}
+	if err := m.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("after a reload: got %d projects, want 1", n)
+	}
+
+	// and without a reload, once repoRetry has passed
+	cache = newRepoCache()
+	cache.now = func() time.Time { return now }
+	cache.sync(m.Generation())
+	cache.put(dir, repoLoc{})
+	if n := count(); n != 0 {
+		t.Fatalf("remembered as no repository: got %d projects", n)
+	}
+	now = now.Add(repoRetry)
+	if n := count(); n != 1 {
+		t.Fatalf("after repoRetry: got %d projects, want 1", n)
+	}
+}
+
+// A folder missing from .gitignore brings thousands of untracked files: only the first
+// maxUntracked are listed (with every tracked change), the rest is a number.
+func TestChangesCapsUntrackedFiles(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	run := func(args ...string) {
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	run("init", "-q")
+	os.WriteFile(filepath.Join(dir, "zz-tracked.txt"), []byte("a\n"), 0o644)
+	run("add", ".")
+	run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
+	os.WriteFile(filepath.Join(dir, "zz-tracked.txt"), []byte("a\nb\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "deps"), 0o755)
+	const extra = 25
+	for i := 0; i < maxUntracked+extra; i++ {
+		os.WriteFile(filepath.Join(dir, "deps", fmt.Sprintf("f%05d.js", i)), []byte("x\n"), 0o644)
+	}
+	cfgPath := filepath.Join(t.TempDir(), "grid.yaml")
+	os.WriteFile(cfgPath, []byte("services:\n  api:\n    cwd: "+dir+"\n    command: echo hi\n"), 0o644)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, msg := gitProjects(runner.NewManager(cfg), newRepoCache())
+	if len(projects) != 1 {
+		t.Fatalf("got %d projects (%s)", len(projects), msg)
+	}
+	p := projects[0]
+	if len(p.Files) != maxUntracked+1 || p.More != extra {
+		t.Fatalf("listed %d files, %d more; want %d and %d", len(p.Files), p.More, maxUntracked+1, extra)
+	}
+	last := p.Files[len(p.Files)-1]
+	if last.Path != "zz-tracked.txt" || last.Status != "M" {
+		t.Fatalf("the tracked change must stay listed, last file is %+v", last)
+	}
+	if p.Files[0].Additions != 1 {
+		t.Fatalf("listed untracked files are line-counted, got %+v", p.Files[0])
 	}
 }
