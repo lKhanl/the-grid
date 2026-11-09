@@ -73,13 +73,22 @@ func gitCtx(parent context.Context, dir string, args ...string) ([]byte, error) 
 	return out.Bytes(), nil
 }
 
-// Root returns the top-level folder of the repository containing dir ("" if none).
-func Root(dir string) (string, error) {
-	out, err := git(dir, "rev-parse", "--show-toplevel")
+// Locate returns the top-level folder of the repository holding dir and the
+// folder of dir inside it ("" = the top level, slash separated). Git works the
+// prefix out itself because the two paths cannot be compared as text: when dir
+// is reached through a junction or mount point (a VDI's C:\dev on an App Volumes
+// disk) git gives the real path behind it as the top level.
+func Locate(dir string) (root, prefix string, err error) {
+	out, err := git(dir, "rev-parse", "--show-toplevel", "--show-prefix")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return filepath.Clean(strings.TrimSpace(string(out))), nil
+	lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
+	root = filepath.Clean(strings.TrimSpace(lines[0]))
+	if len(lines) > 1 {
+		prefix = strings.TrimSuffix(strings.TrimSpace(lines[1]), "/")
+	}
+	return root, prefix, nil
 }
 
 // Branch returns the current branch (or a short commit id when detached).

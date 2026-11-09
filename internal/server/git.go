@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -28,6 +29,10 @@ type gitProject struct {
 	ignore   *gitdiff.Ignore
 }
 
+// repoLoc is where a service folder sits: its repository and its folder in it
+// (as git reports them, see gitdiff.Locate).
+type repoLoc struct{ root, prefix string }
+
 type ignoredFile struct {
 	gitdiff.File
 	Pattern string `json:"pattern"` // the pattern that hides it
@@ -36,8 +41,8 @@ type ignoredFile struct {
 // add puts a changed file in the project, or in its ignored list when a pattern hides it.
 func (p *gitProject) add(f gitdiff.File) {
 	rel := f.Path
-	if p.Prefix != "" {
-		rel = strings.TrimPrefix(f.Path, p.Prefix+"/")
+	if p.Prefix != "" && len(f.Path) > len(p.Prefix) {
+		rel = f.Path[len(p.Prefix)+1:] // cut by length: the case may differ on Windows (see under)
 	}
 	if pat := p.ignore.Match(rel); pat != "" {
 		p.Ignored = append(p.Ignored, ignoredFile{File: f, Pattern: pat})
@@ -46,8 +51,17 @@ func (p *gitProject) add(f gitdiff.File) {
 	p.Files = append(p.Files, f)
 }
 
+// under tells whether a repository path lies in the project folder prefix.
+// Windows folders ignore case, and a cwd typed in grid.yaml may not match
+// the case git keeps, so there the comparison ignores it too.
 func under(path, prefix string) bool {
-	return prefix == "" || path == prefix || strings.HasPrefix(path, prefix+"/")
+	if prefix == "" {
+		return true
+	}
+	if runtime.GOOS == "windows" {
+		path, prefix = strings.ToLower(path), strings.ToLower(prefix)
+	}
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
 }
 
 // gitProjects groups the changed files by project. A file belongs to the
@@ -59,11 +73,11 @@ func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 	visible := map[string]bool{} // repository -> at least one of its services is shown in Changes
 	var firstErr string
 	for _, s := range m.State().Services {
-		var root string
+		var loc repoLoc
 		if v, ok := cache.Load(s.Cwd); ok {
-			root = v.(string)
+			loc = v.(repoLoc)
 		} else {
-			r, err := gitdiff.Root(s.Cwd)
+			r, prefix, err := gitdiff.Locate(s.Cwd)
 			if err != nil {
 				if strings.Contains(err.Error(), "not found on PATH") {
 					return nil, err.Error()
@@ -72,19 +86,16 @@ func gitProjects(m *runner.Manager, cache *sync.Map) ([]gitProject, string) {
 					firstErr = err.Error()
 				}
 			} else {
-				root = r
+				loc = repoLoc{r, prefix}
 			}
-			cache.Store(s.Cwd, root) // "" = not a repository
+			cache.Store(s.Cwd, loc) // root "" = not a repository
 		}
+		root, prefix := loc.root, loc.prefix
 		if root == "" {
 			continue
 		}
 		if !s.NoChanges {
 			visible[root] = true
-		}
-		prefix := ""
-		if rel, err := filepath.Rel(root, s.Cwd); err == nil && rel != "." {
-			prefix = filepath.ToSlash(rel)
 		}
 		k := key{root, prefix}
 		p := projects[k]
@@ -178,7 +189,7 @@ func gitRoutes(mux *http.ServeMux, m *runner.Manager) {
 		root := r.URL.Query().Get("repo")
 		ok := false
 		for _, s := range m.State().Services {
-			if v, found := cache.Load(s.Cwd); found && v.(string) == root && root != "" {
+			if v, found := cache.Load(s.Cwd); found && v.(repoLoc).root == root && root != "" {
 				ok = true
 				break
 			}

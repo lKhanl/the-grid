@@ -117,3 +117,41 @@ func TestChangesIgnoreHidesTrackedAndUntrackedFiles(t *testing.T) {
 		t.Fatalf("unknown pattern: %d", code)
 	}
 }
+
+// A VDI keeps C:\dev on an App Volumes disk: the service folder is reached through a
+// link and git reports the real path behind it as the repository. The files must still
+// belong to the service, not to "<repo> (other files)".
+func TestChangesThroughALinkedFolder(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	real, _ := filepath.EvalSymlinks(t.TempDir())
+	repo := filepath.Join(real, "volume", "be")
+	os.MkdirAll(filepath.Join(repo, "src"), 0o755)
+	c := exec.Command("git", "init", "-q")
+	c.Dir = repo
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s", out)
+	}
+	os.WriteFile(filepath.Join(repo, "src", "app.yml"), []byte("x\n"), 0o644)
+	linked := filepath.Join(real, "dev")
+	if err := os.Symlink(filepath.Join(real, "volume"), linked); err != nil {
+		t.Skip("no symlinks:", err)
+	}
+
+	cfgPath := filepath.Join(t.TempDir(), "grid.yaml")
+	os.WriteFile(cfgPath, []byte("services:\n  be:\n    cwd: "+filepath.Join(linked, "be")+"\n    command: echo hi\n"), 0o644)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(runner.NewManager(cfg), term.NewManager(func() {}), nil, fstest.MapFS{"index.html": {Data: []byte("x")}}))
+	defer srv.Close()
+
+	_, body := gitReq(t, srv, "GET", "/api/git/changes", "")
+	var r struct{ Projects []struct{ Name string } }
+	json.Unmarshal([]byte(body), &r)
+	if len(r.Projects) != 1 || r.Projects[0].Name != "be" {
+		t.Fatalf("want the service's own project, got %s", body)
+	}
+}
