@@ -49,7 +49,12 @@ function serve() {
   let store = null; try { store = openStore() } catch (e) { console.error('warning: no ~/.grid state (recent workspaces disabled):', e.message) }
   // --config wins; else ./grid.yaml; else the last opened workspace
   let cfgFile = path.resolve(flag ? flag.slice(9) : 'grid.yaml')
-  if (!flag && !fs.existsSync(cfgFile) && store) { try { cfgFile = store.last() || cfgFile } catch {} }
+  if (!flag && !fs.existsSync(cfgFile)) {
+    if (store) { try { cfgFile = store.last() || cfgFile } catch {} }
+    // last resort: the empty default workspace the installer creates (~/.grid/grid.yaml)
+    const def = path.join(gridDir(), 'grid.yaml')
+    if (!fs.existsSync(cfgFile) && fs.existsSync(def)) cfgFile = def
+  }
   let base = path.dirname(cfgFile)
   const ui = loadUI()
   let cfg, svcs = {}

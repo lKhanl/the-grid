@@ -68,7 +68,7 @@ Publish in exactly this order (files and tag first, the manifest LAST):
   git push origin HEAD
   git push origin v${version}
 then, once both pushes are done:
-  ${process.platform === 'win32' ? 'copy /Y manifest.next.json manifest.json' : 'cp manifest.next.json manifest.json'}
+  ${process.platform === 'win32' ? 'Copy-Item -Force manifest.next.json manifest.json   (PowerShell)  |  copy /Y manifest.next.json manifest.json   (cmd)' : 'cp manifest.next.json manifest.json'}
   git add manifest.json
   git commit -m "manifest v${version}"
   git push origin HEAD
