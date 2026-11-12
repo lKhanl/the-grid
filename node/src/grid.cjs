@@ -1,12 +1,14 @@
 // The Grid - Node PoC v2: supervisor + the existing React UI + CLI, single file.
 const fs = require('fs'), path = require('path'), http = require('http'), net = require('net')
 const { spawn, execFile } = require('child_process')
-const YAML = require('yaml')
+const { load: loadConfig, environ, checkRuntime } = require('./config.cjs')
+const { Service } = require('./service.cjs')
+const { stripAnsi } = require('./util.cjs')
 const { WebSocketServer } = require('ws')
 let nodePty = null
 try { nodePty = require('node-pty') } catch (e) { console.error('node-pty not available, terminals use plain pipes:', e.message.split('\n')[0]) }
 const WIN = process.platform === 'win32'
-const VERSION = '0.0.1-nodepoc'
+const VERSION = '0.0.2-nodepoc'
 const PORT = Number(process.env.GRID_PORT || 18900)
 const [cmd = 'serve', ...args] = process.argv.slice(2)
 if (cmd !== 'serve') cli(); else serve()
@@ -21,6 +23,9 @@ function loadUI() { // embedded (bundle) or ./ui next to the script (dev)
 }
 const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', json: 'application/json', woff2: 'font/woff2' }
 
+
+const LOG_LINE_OPTIONS = [1000, 2500, 5000, 10000]
+
 function serve() {
   const flag = args.find(a => a.startsWith('--config='))
   const cfgFile = path.resolve(flag ? flag.slice(9) : 'grid.yaml')
@@ -31,88 +36,60 @@ function serve() {
   const settings = { logLines: 1000, logFiles: false }
   const send = ev => { const d = `data: ${JSON.stringify(ev)}\n\n`; for (const r of clients) r.write(d) }
 
-  const info = v => ({
-    name: v.name, group: v.s.group || '', description: v.s.description, status: v.state, pid: v.pid || undefined,
-    exitCode: v.exitCode, startedAt: v.startedAt, restarts: v.restarts, type: v.s.type || 'custom',
-    command: v.s.command || '', cwd: path.resolve(base, v.s.cwd || '.'), url: v.s.url,
-    dependsOn: v.s.depends_on, ready: v.s.ready && (v.s.ready.port ? 'port ' + v.s.ready.port : 'log /' + v.s.ready.log + '/'),
-  })
+  // what Service needs from its manager
+  const mgr = {
+    send, get: n => svcs[n], logLines: () => settings.logLines, environ: sc => environ(cfg, sc),
+    get config() { return cfg },
+  }
   const state = () => ({
     version: VERSION, name: cfg.name || 'Grid', configPath: cfgFile, logLines: settings.logLines,
-    logLineOptions: [500, 1000, 2000, 5000], runtimes: [], services: Object.values(svcs).map(info),
+    logLineOptions: LOG_LINE_OPTIONS,
+    runtimes: [...cfg.runtimes.values()].map(rt => ({ name: rt.name, type: rt.type, home: rt.home, error: checkRuntime(rt) || undefined })),
+    services: Object.values(svcs).map(v => v.info()),
     features: [], logFileMax: 0, logFiles: settings.logFiles,
   })
-  function load() {
-    cfg = YAML.parse(fs.readFileSync(cfgFile, 'utf8'))
-    const old = svcs; svcs = {}
-    for (const [name, s] of Object.entries(cfg.services || {}))
-      svcs[name] = old[name] ? Object.assign(old[name], { s }) : { name, s, state: 'stopped', pid: null, logs: [], seq: 0, restarts: 0 }
+  const snapshot = (withLogs) => {
+    const ev = { type: 'snapshot', state: state(), terms: [...terms.values()].map(termInfo) }
+    if (withLogs) { ev.logs = {}; for (const v of Object.values(svcs)) ev.logs[v.name] = v.tail(settings.logLines) }
+    return ev
   }
-  load()
+  // Reads the file; running services keep running with the old settings, the new ones apply on their next start.
+  // Services removed from the file are stopped and dropped. Throws when the file is invalid (nothing changes).
+  async function load() {
+    const next = loadConfig(cfgFile), old = svcs; svcs = {}; cfg = next
+    for (const s of next.services) {
+      if (old[s.name]) { svcs[s.name] = old[s.name]; svcs[s.name].setConfig(s); delete old[s.name] } else svcs[s.name] = new Service(mgr, s)
+    }
+    await Promise.all(Object.values(old).map(v => v.stop().catch(() => {})))
+  }
+  try { cfg = loadConfig(cfgFile); for (const s of cfg.services) svcs[s.name] = new Service(mgr, s) } catch (e) { console.error(e.message); process.exit(1) }
 
-  const emit = (v, stream, line) => {
-    const entry = { seq: ++v.seq, t: Date.now(), s: stream, line }
-    v.logs.push(entry); if (v.logs.length > 5000) v.logs.shift()
-    send({ type: 'log', service: v.name, entry })
+  // "all", a service name or a group name
+  function resolve(target) {
+    if (target === 'all') return Object.values(svcs)
+    if (svcs[target]) return [svcs[target]]
+    const g = target.startsWith('group:') ? target.slice(6) : target
+    const out = Object.values(svcs).filter(v => v.cfg.group === g)
+    if (!out.length) throw new Error(`no service or group named "${target}"`)
+    return out
   }
-  const setState = (v, st) => { v.state = st; send({ type: 'service', info: info(v) }) }
-  const pipeLines = (v, stream, kind) => {
-    const d = new TextDecoder(process.env.GRID_ENC || 'utf-8'); let buf = ''
-    stream.on('data', c => {
-      buf += d.decode(c, { stream: true }); let i
-      while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i).replace(/\r$/, ''); buf = buf.slice(i + 1); emit(v, kind, l); v.onLine && v.onLine(l) }
-    })
-  }
-  const waitPort = (port, ms) => new Promise((ok, no) => {
-    const t0 = Date.now()
-    const t = () => { const c = net.connect(port, '127.0.0.1'); c.on('connect', () => { c.destroy(); ok() }); c.on('error', () => { c.destroy(); Date.now() - t0 > ms ? no(new Error('port timeout')) : setTimeout(t, 200) }) }
-    t()
-  })
-  const waitLog = (v, re, ms) => new Promise((ok, no) => {
-    const rx = new RegExp(re); const t = setTimeout(() => no(new Error('log timeout')), ms)
-    v.onLine = l => { if (rx.test(l)) { clearTimeout(t); v.onLine = null; ok() } }
-  })
-  async function start(name) {
-    const v = svcs[name]; if (!v) throw new Error('unknown service ' + name)
-    if (['running', 'starting'].includes(v.state)) return
-    for (const d of v.s.depends_on || []) await start(d)
-    setState(v, 'starting'); v.startedAt = Date.now(); v.exitCode = undefined
-    emit(v, 'sys', 'starting: ' + v.s.command)
-    const env = { ...process.env, ...cfg.env, ...v.s.env }
-    const p = v.proc = spawn(v.s.command, { shell: true, cwd: path.resolve(base, v.s.cwd || '.'), env, detached: !WIN, windowsHide: true })
-    v.pid = p.pid; pipeLines(v, p.stdout, 'out'); pipeLines(v, p.stderr, 'err')
-    p.on('exit', code => {
-      const wanted = v.state === 'stopping'; v.pid = null; v.exitCode = code
-      emit(v, 'sys', `exited with code ${code}`); setState(v, wanted ? 'stopped' : code === 0 ? 'exited' : 'crashed')
-    })
-    const r = v.s.ready, ms = 120000
-    try {
-      if (r && r.port) await waitPort(r.port, ms); else if (r && r.log) await waitLog(v, r.log, ms)
-      if (v.state === 'starting') setState(v, 'running')
-    } catch (e) { emit(v, 'sys', e.message) }
+  // start / restart run in the background (they may wait for dependencies); stop waits for the processes to exit
+  async function act(target, action) {
+    const list = resolve(target), bg = p => p.catch(() => {}) // failures are logged by the service
+    switch (action) {
+      case 'start': list.forEach(v => bg(v.start())); break
+      case 'start-nobuild': list.forEach(v => bg(v.start(true))); break
+      case 'restart': list.forEach(v => bg(v.restart())); break
+      case 'stop': await Promise.all(list.map(v => v.stop())); break
+      case 'clear': list.forEach(v => v.clear()); break
+      default: throw new Error(`unknown action "${action}"`)
+    }
   }
   const killTree = pid => new Promise(ok => {
     if (WIN) return execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => ok())
     try { process.kill(-pid, 'SIGTERM') } catch {}
     setTimeout(() => { try { process.kill(-pid, 'SIGKILL') } catch {} ; ok() }, 1500)
   })
-  async function stop(name) {
-    const v = svcs[name]; if (!v) throw new Error('unknown service ' + name)
-    if (!v.pid) return
-    setState(v, 'stopping'); await killTree(v.pid)
-  }
-  const sleep = ms => new Promise(r => setTimeout(r, ms))
-  async function act(target, action) {
-    const names = target === 'all' ? Object.keys(svcs) : target.startsWith('group:') ? Object.keys(svcs).filter(n => (svcs[n].s.group || '') === target.slice(6)) : [target]
-    if (action === 'clear') return names.forEach(n => { svcs[n].logs = [] })
-    for (const n of names) {
-      if (!svcs[n]) throw new Error('unknown service ' + n)
-      if (action === 'stop') await stop(n)
-      else if (action === 'restart') { await stop(n); await sleep(300); svcs[n].restarts++; start(n) }
-      else if (action === 'start' || action === 'start-nobuild') start(n)
-      else throw new Error('unknown action ' + action)
-    }
-  }
 
 
   // ---- terminals: node-pty (real pty / ConPTY) when available, else plain pipes ----
@@ -124,8 +101,11 @@ function serve() {
   const sendTerms = () => send({ type: 'terms', terms: [...terms.values()].map(termInfo) })
   function openTerm(o) {
     const sh = o.shell || shells()[0].path
-    const cwd = o.cwd ? path.resolve(base, o.cwd) : base
-    const env = { ...process.env, ...cfg.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'the-grid' }
+    // a service's terminal gets exactly what the service gets (env, env files, runtimes) in its folder
+    const v = o.service && svcs[o.service]
+    if (o.service && !v) throw new Error(`unknown service "${o.service}"`)
+    const cwd = o.cwd ? path.resolve(base, o.cwd) : v ? v.cfg.cwd : base
+    const env = { ...environ(cfg, v ? { ...v.cfg, color: false } : { runtime: o.runtimes || [], color: false }), TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'the-grid' }
     const t = { id: 't' + (++termSeq), title: o.service || path.basename(sh), shell: sh, cwd, service: o.service, runtimes: o.runtimes, started: Date.now(), exited: false, hist: Buffer.alloc(0), subs: new Set() }
     const out = b => { t.hist = Buffer.concat([t.hist, b]); if (t.hist.length > 262144) t.hist = t.hist.subarray(-262144); for (const f of t.subs) f(b) }
     const done = code => { t.exited = true; t.exitCode = code; t.pid = undefined; for (const f of t.subs) f(null); sendTerms() }
@@ -152,9 +132,9 @@ function serve() {
     try {
       if (p === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
-        const logs = {}; for (const v of Object.values(svcs)) logs[v.name] = v.logs.slice(-settings.logLines)
-        res.write(`data: ${JSON.stringify({ type: 'snapshot', state: state(), logs, terms: [...terms.values()].map(termInfo) })}\n\n`)
-        clients.add(res); return req.on('close', () => clients.delete(res))
+        res.write(`data: ${JSON.stringify(snapshot(true))}\n\n`)
+        const ping = setInterval(() => res.write(': ping\n\n'), 15000)
+        clients.add(res); return req.on('close', () => { clearInterval(ping); clients.delete(res) })
       }
       if (p === '/api/state') return json(state())
       let m
@@ -163,12 +143,24 @@ function serve() {
       }
       if ((m = p.match(/^\/api\/services\/([^/]+)\/logs$/))) {
         const v = svcs[decodeURIComponent(m[1])]; if (!v) return json({ error: 'unknown service' }, 404)
-        const e = v.logs.slice(-(Number(u.searchParams.get('tail')) || 200))
+        const n = parseInt(u.searchParams.get('tail')) || 200
+        const e = u.searchParams.get('since') === 'start' ? v.sinceStart(n) : v.tail(n) // since=start: only what the latest start produced
         if (u.searchParams.get('format') === 'json') return json(e)
-        res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }); return res.end(e.map(x => (x.s === 'sys' ? '[grid] ' : '') + x.line.replace(/\x1b\[[0-9;]*m/g, '')).join('\n') + '\n')
+        const raw = u.searchParams.get('raw') === '1'
+        res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }); return res.end(e.map(x => (x.s === 'sys' ? '[grid] ' : '') + (raw ? x.line : stripAnsi(x.line))).join('\n') + '\n')
       }
-      if (p === '/api/reload' && req.method === 'POST') { load(); send({ type: 'snapshot', state: state(), terms: [...terms.values()].map(termInfo) }); return json({ ok: true }) }
-      if (p === '/api/settings' && req.method === 'PUT') { Object.assign(settings, await body()); send({ type: 'snapshot', state: state(), terms: [...terms.values()].map(termInfo) }); return json(state()) }
+      if (p === '/api/reload' && req.method === 'POST') {
+        try { await load() } catch (e) { return json({ error: e.message }, 400) }
+        send(snapshot(false)); return json(state())
+      }
+      if (p === '/api/settings' && req.method === 'PUT') {
+        const b = await body()
+        if (b.logLines === undefined && b.logFiles === undefined) return json({ error: 'expected logLines and/or logFiles' }, 400)
+        if (b.logLines !== undefined && !LOG_LINE_OPTIONS.includes(b.logLines)) return json({ error: `logLines must be one of [${LOG_LINE_OPTIONS.join(' ')}]` }, 400)
+        if (b.logLines !== undefined) { settings.logLines = b.logLines; Object.values(svcs).forEach(v => v.setMax()) }
+        if (b.logFiles !== undefined) settings.logFiles = !!b.logFiles // remembered only: the node runner writes no log files
+        send(snapshot(false)); return json(state())
+      }
       if (p === '/api/workspaces') return json({ workspaces: [] })
       if (p === '/api/terms/shells') return json(shells())
       if (p === '/api/terms' && req.method === 'GET') return json([...terms.values()].map(termInfo))
@@ -201,10 +193,10 @@ function serve() {
   })
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`The Grid ${VERSION} http://127.0.0.1:${PORT}  (config: ${cfgFile})`)
-    for (const [n, s] of Object.entries(cfg.services || {})) if (s.autostart) start(n)
+    for (const v of Object.values(svcs)) if (v.cfg.autostart) v.start().catch(() => {})
     if (!args.includes('--no-browser')) execFile(WIN ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open', WIN ? ['/c', 'start', '', `http://127.0.0.1:${PORT}`] : [`http://127.0.0.1:${PORT}`], () => {})
   })
-  const bye = async () => { terms.forEach(t => !t.exited && t.kill()); await Promise.all(Object.keys(svcs).map(n => stop(n).catch(() => {}))); process.exit(0) }
+  const bye = async () => { terms.forEach(t => !t.exited && t.kill()); await Promise.all(Object.values(svcs).map(v => v.stop().catch(() => {}))); process.exit(0) }
   process.on('SIGINT', bye); process.on('SIGTERM', bye)
 }
 
