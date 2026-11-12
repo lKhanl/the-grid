@@ -1,3 +1,7 @@
+> **This branch (`node-poc`) has no Go code.** It holds the Node.js version only: see
+> [`node-poc/`](node-poc/). Run it with `cd node-poc/release && node grid.bundle.cjs serve`.
+> The text below describes the Go version on `master`; not every feature exists here yet.
+
 <p align="center">
   <img src="docs/logo.svg" alt="The Grid" width="96" height="96">
 </p>
