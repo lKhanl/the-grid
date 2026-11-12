@@ -27,7 +27,7 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build
 
-      # web/dist is committed (node-poc/build.sh embeds it); it must match the sources
+      # web/dist is committed (node/build.sh embeds it); it must match the sources
       - name: web/dist is up to date
         run: |
           if ! git diff --quiet -- web/dist || [ -n "$(git ls-files --others --exclude-standard web/dist)" ]; then
