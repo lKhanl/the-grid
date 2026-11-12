@@ -7762,7 +7762,7 @@ var require_config = __commonJS({
       for (const [f, v] of vals) out[keys.get(f)] = v;
       return out;
     }
-    module2.exports = { load, environ: environ2, binDir, checkRuntime: checkRuntime2, NAME_RE };
+    module2.exports = { load, environ: environ2, binDir, executable, checkRuntime: checkRuntime2, runtimeVars, normalizeRuntime, normalizeService, inferType, NAME_RE, RUNTIME_TYPES };
   }
 });
 
@@ -8445,6 +8445,1137 @@ var require_service = __commonJS({
       }
     };
     module2.exports = { Service: Service2 };
+  }
+});
+
+// src/edit.cjs
+var require_edit = __commonJS({
+  "src/edit.cjs"(exports2, module2) {
+    var fs2 = require("fs");
+    var path2 = require("path");
+    var YAML = require_dist();
+    var { Scalar, YAMLMap, YAMLSeq, Pair, isMap, isSeq, isScalar } = YAML;
+    var { load: loadConfig2, NAME_RE, RUNTIME_TYPES, inferType, normalizeService } = require_config();
+    var { plan } = require_plan();
+    var SERVICE_ORDER = [
+      "group",
+      "description",
+      "type",
+      "cwd",
+      "command",
+      "spring",
+      "node",
+      "script",
+      "jar",
+      "shell",
+      "runtime",
+      "env",
+      "env_file",
+      "encoding",
+      "depends_on",
+      "ready",
+      "restart",
+      "max_restarts",
+      "autostart",
+      "stop_timeout",
+      "url",
+      "changes",
+      "changes_ignore"
+    ];
+    var RUNTIME_ORDER = ["type", "home", "bin", "env"];
+    var SPRING_ORDER = ["module", "profiles", "jvm_args", "args", "mode", "skip_tests", "offline", "always_build"];
+    var NODE_ORDER = ["script", "args", "install", "package_manager"];
+    var SCRIPT_ORDER = ["file", "args"];
+    var JAR_ORDER = ["file", "jvm_args", "args"];
+    var str = (v) => v === void 0 || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+    var strList = (v) => v === void 0 || v === null ? [] : Array.isArray(v) ? v.map(str) : str(v) ? [str(v)] : [];
+    var obj = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : null;
+    var nz = (s) => {
+      s = str(s);
+      return s === "" ? void 0 : s;
+    };
+    var keyOf = (p) => isScalar(p.key) ? str(p.key.value) : str(p.key);
+    var find = (m, k) => m.items.findIndex((p) => keyOf(p) === k);
+    var nodeJS = (doc, n) => n === void 0 || n === null ? void 0 : isScalar(n) ? n.value : n.toJS(doc);
+    var fail = (msg) => {
+      throw Object.assign(new Error(msg), { badRequest: true });
+    };
+    var entriesOf = (env, flow) => ({ entries: env.map((e) => [e.key, e.value]), flow });
+    function listOfNode(n) {
+      if (isSeq(n)) return n.items.map((i) => isScalar(i) ? str(i.value) : str(i));
+      if (isScalar(n)) return n.value === null || n.value === "" ? [] : [str(n.value)];
+      return null;
+    }
+    function same(old, val) {
+      if (Array.isArray(val)) {
+        const l = listOfNode(old);
+        return !!l && l.length === val.length && l.every((x, i) => x === str(val[i]));
+      }
+      if (val && typeof val === "object") {
+        return isMap(old) && old.items.length === val.entries.length && old.items.every((p, i) => keyOf(p) === val.entries[i][0] && isScalar(p.value) && str(p.value.value) === str(val.entries[i][1]));
+      }
+      if (!isScalar(old)) return false;
+      return typeof val === "boolean" ? old.value === val : str(old.value) === str(val);
+    }
+    function build(val, opt) {
+      if (Array.isArray(val)) {
+        if (opt.scalarOne && val.length === 1) return new Scalar(val[0]);
+        const s = new YAMLSeq();
+        s.flow = opt.flow !== false;
+        for (const v of val) s.items.push(new Scalar(v));
+        return s;
+      }
+      if (val && typeof val === "object") {
+        const m = new YAMLMap();
+        m.flow = !!val.flow;
+        for (const [k, v] of val.entries) m.items.push(new Pair(new Scalar(k), new Scalar(v)));
+        return m;
+      }
+      return new Scalar(val);
+    }
+    var rank = (order, k) => order.indexOf(k);
+    function setVal(m, key, val, opt = {}) {
+      const order = opt.order || SERVICE_ORDER, i = find(m, key);
+      if (val === void 0) {
+        if (i >= 0 && !(isScalar(m.items[i].value) && (m.items[i].value.value === null || m.items[i].value.value === ""))) m.items.splice(i, 1);
+        return;
+      }
+      if (i >= 0) {
+        const pair = m.items[i], old = pair.value;
+        if (old && same(old, val)) return;
+        const nu = build(val, opt);
+        if (old) {
+          for (const f of ["comment", "commentBefore", "spaceBefore"]) if (old[f] !== void 0) nu[f] = old[f];
+          if (isMap(old) && isMap(nu) || isSeq(old) && isSeq(nu)) nu.flow = old.flow;
+        }
+        pair.value = nu;
+        return;
+      }
+      insertPair(m, key, build(val, opt), order);
+    }
+    function insertPair(m, key, node, order) {
+      let pos = m.items.length;
+      const r = rank(order, key);
+      if (r >= 0) for (let j = 0; j < m.items.length; j++) {
+        if (rank(order, keyOf(m.items[j])) > r) {
+          pos = j;
+          break;
+        }
+      }
+      m.items.splice(pos, 0, new Pair(new Scalar(key), node));
+    }
+    function setBlock(m, key, pairs, order, keepEmpty) {
+      const i = find(m, key), cur = i >= 0 ? m.items[i].value : null;
+      if (isMap(cur)) {
+        for (const [k, v] of pairs) setVal(cur, k, v, { order });
+        if (!cur.items.length && !keepEmpty) m.items.splice(i, 1);
+        return;
+      }
+      const defined = pairs.filter(([, v]) => v !== void 0);
+      if (!defined.length && !keepEmpty) {
+        if (i >= 0) m.items.splice(i, 1);
+        return;
+      }
+      const nm = new YAMLMap();
+      nm.flow = defined.length <= 6;
+      for (const [k, v] of defined) nm.items.push(new Pair(new Scalar(k), build(v, {})));
+      if (i >= 0) {
+        const old = cur;
+        if (old) {
+          for (const f of ["comment", "commentBefore", "spaceBefore"]) if (old[f] !== void 0) nm[f] = old[f];
+        }
+        m.items[i].value = nm;
+      } else insertPair(m, key, nm, SERVICE_ORDER);
+    }
+    function rootMap(doc, file) {
+      if (doc.contents === null || doc.contents === void 0) doc.contents = new YAMLMap();
+      if (!isMap(doc.contents)) fail(`${file}: top level must be a mapping`);
+      return doc.contents;
+    }
+    function section(root, key, create, beforeKey) {
+      let i = find(root, key);
+      if (i >= 0) {
+        let v = root.items[i].value;
+        if (!isMap(v)) {
+          if (!create) return null;
+          const nm = new YAMLMap();
+          if (v) {
+            for (const f of ["comment", "commentBefore"]) if (v[f] !== void 0) nm[f] = v[f];
+          }
+          root.items[i].value = v;
+          v = root.items[i].value = nm;
+        }
+        if (create && v.flow && !v.items.length) v.flow = false;
+        if (v.commentBefore && v.items.length && v.items[0].key) {
+          const k2 = v.items[0].key;
+          k2.commentBefore = k2.commentBefore ? v.commentBefore + "\n" + k2.commentBefore : v.commentBefore;
+          v.commentBefore = void 0;
+        }
+        return v;
+      }
+      if (!create) return null;
+      const m = new YAMLMap(), k = new Scalar(key);
+      let pos = root.items.length;
+      if (beforeKey) {
+        const j = find(root, beforeKey);
+        if (j >= 0) pos = j;
+      }
+      if (pos > 0) {
+        k.spaceBefore = true;
+        if (beforeKey && pos < root.items.length && !root.items[pos].key.spaceBefore) root.items[pos].key.spaceBefore = true;
+      }
+      root.items.splice(pos, 0, new Pair(k, m));
+      return m;
+    }
+    var servicesOf = (root, create = true) => section(root, "services", create);
+    var runtimesOf = (root, create) => section(root, "runtimes", create, "services");
+    function addEntry(m, name) {
+      const k = new Scalar(name), nm = new YAMLMap(), its = m.items;
+      k.spaceBefore = its.length > 0 && !(its.length > 1 && !its.slice(1).some((p) => p.key && p.key.spaceBefore));
+      m.items.push(new Pair(k, nm));
+      return nm;
+    }
+    var envList = (raw, flat) => {
+      const e = obj(raw);
+      return e ? Object.entries(e).map(([key, value]) => ({ key, value: str(value) })) : [];
+    };
+    function specFromRaw(name, r) {
+      r = obj(r) || {};
+      const s = {
+        name,
+        group: str(r.group),
+        description: str(r.description),
+        type: str(r.type) || "custom",
+        command: str(r.command),
+        cwd: str(r.cwd),
+        shell: str(r.shell),
+        runtime: strList(r.runtime),
+        env: envList(r.env),
+        envFile: str(r.env_file),
+        encoding: str(r.encoding),
+        dependsOn: strList(r.depends_on),
+        readyPort: 0,
+        readyLog: "",
+        readyTimeout: "",
+        restart: str(r.restart),
+        maxRestarts: Number(r.max_restarts) || 0,
+        autostart: r.autostart === true,
+        stopTimeout: str(r.stop_timeout),
+        url: str(r.url),
+        noChanges: r.changes === false,
+        changesIgnore: strList(r.changes_ignore)
+      };
+      const rd = obj(r.ready);
+      if (rd) {
+        s.readyPort = Number(rd.port) || 0;
+        s.readyLog = str(rd.log);
+        s.readyTimeout = str(rd.timeout);
+      }
+      const sp = obj(r.spring), nd = obj(r.node), sc = obj(r.script), jr = obj(r.jar);
+      if (sp) s.spring = { module: str(sp.module), profiles: strList(sp.profiles), jvmArgs: str(sp.jvm_args), args: str(sp.args), mode: str(sp.mode), skipTests: sp.skip_tests === void 0 || sp.skip_tests === null || sp.skip_tests !== false, offline: sp.offline === true, alwaysBuild: sp.always_build === true };
+      if (nd) s.node = { script: str(nd.script), args: str(nd.args), install: str(nd.install), packageManager: str(nd.package_manager) };
+      if (sc) s.script = { file: str(sc.file), args: str(sc.args) };
+      if (jr) s.jar = { file: str(jr.file), jvmArgs: str(jr.jvm_args), args: str(jr.args) };
+      return s;
+    }
+    function typedBlocks(s, t) {
+      const o = s.spring || { skipTests: true }, n = s.node || {}, sc = s.script || {}, j = s.jar || {};
+      switch (t) {
+        case "spring-boot":
+          return { spring: { order: SPRING_ORDER, keepEmpty: true, pairs: [
+            ["module", nz(o.module)],
+            ["profiles", strList(o.profiles).length ? strList(o.profiles) : void 0],
+            ["jvm_args", nz(o.jvmArgs)],
+            ["args", nz(o.args)],
+            ["mode", o.mode === "run" ? "run" : void 0],
+            ["skip_tests", o.skipTests === false ? false : void 0],
+            ["offline", o.offline ? true : void 0],
+            ["always_build", o.alwaysBuild ? true : void 0]
+          ] } };
+        case "node":
+          return { node: { order: NODE_ORDER, pairs: [["script", nz(n.script)], ["args", nz(n.args)], ["install", n.install && n.install !== "if-changed" ? n.install : void 0], ["package_manager", n.packageManager && n.packageManager !== "auto" ? n.packageManager : void 0]] } };
+        case "script":
+          return { script: { order: SCRIPT_ORDER, pairs: [["file", nz(sc.file)], ["args", nz(sc.args)]] } };
+        case "jar":
+          return { jar: { order: JAR_ORDER, pairs: [["file", nz(j.file)], ["jvm_args", nz(j.jvmArgs)], ["args", nz(j.args)]] } };
+      }
+      return {};
+    }
+    function applyType(m, s) {
+      const t = str(s.type).trim() || "custom";
+      if (t === "custom") {
+        setVal(m, "type", void 0);
+        setVal(m, "command", str(s.command));
+      } else {
+        setVal(m, "type", t);
+        setVal(m, "command", void 0);
+      }
+      const blocks = typedBlocks(s, t);
+      for (const k of ["spring", "node", "script", "jar"]) {
+        const b = blocks[k];
+        if (b) setBlock(m, k, b.pairs, b.order, !!b.keepEmpty);
+        else setVal(m, k, void 0);
+      }
+    }
+    function envValue(list, what) {
+      const out = [], seen = /* @__PURE__ */ new Set();
+      for (const e of list || []) {
+        const k = str(e && e.key).trim();
+        if (!k) continue;
+        if (seen.has(k)) fail(`${what}: duplicate variable ${k}`);
+        seen.add(k);
+        out.push({ key: k, value: str(e.value) });
+      }
+      return out;
+    }
+    function applySpec(m, s) {
+      setVal(m, "group", nz(s.group));
+      setVal(m, "description", nz(s.description));
+      setVal(m, "cwd", nz(s.cwd));
+      applyType(m, s);
+      setVal(m, "shell", nz(s.shell));
+      const rt = strList(s.runtime);
+      setVal(m, "runtime", rt.length ? rt : void 0, { scalarOne: true });
+      const env = envValue(s.env, "env");
+      setVal(m, "env", env.length ? entriesOf(env, env.length <= 3) : void 0);
+      setVal(m, "env_file", nz(s.envFile));
+      setVal(m, "encoding", s.encoding === "" || s.encoding === "auto" || s.encoding === void 0 || s.encoding === null ? void 0 : str(s.encoding));
+      const deps = strList(s.dependsOn);
+      setVal(m, "depends_on", deps.length ? deps : void 0);
+      const port = Number(s.readyPort) || 0, log = str(s.readyLog);
+      if (port > 0 || log) {
+        const e = [port > 0 ? ["port", port] : ["log", log]];
+        if (str(s.readyTimeout)) e.push(["timeout", str(s.readyTimeout)]);
+        setVal(m, "ready", { entries: e, flow: true });
+      } else setVal(m, "ready", void 0);
+      const rs = str(s.restart), mr = Number(s.maxRestarts) || 0;
+      if (rs === "" || rs === "no") {
+        setVal(m, "restart", void 0);
+        setVal(m, "max_restarts", void 0);
+      } else {
+        setVal(m, "restart", rs);
+        setVal(m, "max_restarts", mr > 0 ? mr : void 0);
+      }
+      setVal(m, "autostart", s.autostart ? true : void 0);
+      setVal(m, "stop_timeout", nz(s.stopTimeout));
+      setVal(m, "url", nz(s.url));
+      setVal(m, "changes", s.noChanges ? false : void 0);
+      const ign = strList(s.changesIgnore).map((p) => p.trim()).filter(Boolean);
+      setVal(m, "changes_ignore", ign.length ? ign : void 0, { flow: false });
+    }
+    function rawForPreview(s) {
+      const raw = { type: str(s.type).trim() || "custom", command: str(s.command) };
+      if (s.cwd) raw.cwd = s.cwd;
+      for (const [k, order] of [["spring", SPRING_ORDER], ["node", NODE_ORDER], ["script", SCRIPT_ORDER], ["jar", JAR_ORDER]]) {
+        const b = typedBlocks(s, raw.type)[k];
+        if (!b) continue;
+        raw[k] = {};
+        for (const [bk, v] of b.pairs) if (v !== void 0) raw[k][bk] = v;
+      }
+      return raw;
+    }
+    function previewSpec(base, s) {
+      try {
+        const p = plan(normalizeService(base, str(s.name) || "preview", rawForPreview(s)), false, false);
+        return { build: p.buildPreview || "", run: p.runPreview || "" };
+      } catch (e) {
+        return { build: "", run: "", error: e.message };
+      }
+    }
+    var normLine = (l) => {
+      const m = /^(\s*)([\s\S]*)$/.exec(l);
+      return (m[2].startsWith("- ") ? "" : m[1]) + m[2].replace(/\s+#/g, " #").replace(/([[{])\s+/g, "$1").replace(/\s+([\]}])/g, "$1").replace(/\s*,\s*/g, ",").replace(/\s+$/, "");
+    };
+    function mergeLayout(orig, next) {
+      const A = orig.split(/\r?\n/), B = next.split("\n").map((l) => /["']/.test(l) ? l : l.replace(/\[ ([^[\]{}]*?) \]/g, "[$1]")), ka = A.map(normLine), kb = B.map(normLine);
+      let lo = 0;
+      while (lo < A.length && lo < B.length && ka[lo] === kb[lo]) lo++;
+      let ea = A.length, eb = B.length;
+      while (ea > lo && eb > lo && ka[ea - 1] === kb[eb - 1]) {
+        ea--;
+        eb--;
+      }
+      const n = ea - lo, m = eb - lo, out = A.slice(0, lo);
+      if (n * m > 25e6) return next;
+      const w = m + 1, t = new Int32Array((n + 1) * w);
+      for (let i2 = n - 1; i2 >= 0; i2--) for (let j2 = m - 1; j2 >= 0; j2--) t[i2 * w + j2] = ka[lo + i2] === kb[lo + j2] ? t[(i2 + 1) * w + j2 + 1] + 1 : Math.max(t[(i2 + 1) * w + j2], t[i2 * w + j2 + 1]);
+      const ops = [];
+      const gone = /* @__PURE__ */ new Map();
+      let i = 0, j = 0;
+      while (i < n && j < m) {
+        if (ka[lo + i] === kb[lo + j]) {
+          ops.push(A[lo + i]);
+          i++;
+          j++;
+        } else if (t[(i + 1) * w + j] >= t[i * w + j + 1]) {
+          const k = ka[lo + i];
+          (gone.get(k) || gone.set(k, []).get(k)).push(A[lo + i]);
+          i++;
+        } else {
+          ops.push([kb[lo + j], B[lo + j]]);
+          j++;
+        }
+      }
+      while (i < n) {
+        const k = ka[lo + i];
+        (gone.get(k) || gone.set(k, []).get(k)).push(A[lo + i]);
+        i++;
+      }
+      while (j < m) ops.push([kb[lo + j], B[lo + j++]]);
+      for (const op of ops) out.push(typeof op === "string" ? op : op[0].trim() && gone.has(op[0]) && gone.get(op[0]).length ? gone.get(op[0]).shift() : op[1]);
+      return out.concat(A.slice(ea)).join("\n");
+    }
+    function guessIndent(src) {
+      let min = 0;
+      for (const l of src.split(/\r?\n/)) {
+        const m = /^( +)\S/.exec(l);
+        if (m && !m[0].trimStart().startsWith("#") && (!min || m[1].length < min)) min = m[1].length;
+      }
+      return min >= 1 && min <= 8 ? min : 2;
+    }
+    function guessIndentSeq(src) {
+      const lines = src.split(/\r?\n/);
+      for (let i = 0; i + 1 < lines.length; i++) {
+        const k = /^(\s*)[^\s#-][^#]*:\s*(#.*)?$/.exec(lines[i]), s = k && /^(\s*)- /.exec(lines[i + 1]);
+        if (k && s) return s[1].length > k[1].length;
+      }
+      return true;
+    }
+    var sleepSync = (ms) => {
+      try {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+      } catch {
+      }
+    };
+    function renameRetry(from, to) {
+      for (let i = 0; ; i++) {
+        try {
+          return fs2.renameSync(from, to);
+        } catch (e) {
+          if (i >= 5 || !["EPERM", "EBUSY", "EACCES"].includes(e.code)) throw e;
+          sleepSync(60);
+        }
+      }
+    }
+    function edit(file, fn) {
+      const rawText = fs2.readFileSync(file, "utf8"), bom = rawText.charCodeAt(0) === 65279, orig = bom ? rawText.slice(1) : rawText;
+      const doc = YAML.parseDocument(orig);
+      if (doc.errors.length) fail(`${file}: ${doc.errors[0].message}`);
+      fn(doc, rootMap(doc, file));
+      const printed = doc.toString({ lineWidth: 0, indent: guessIndent(orig), indentSeq: guessIndentSeq(orig) });
+      let text = mergeLayout(orig, printed);
+      try {
+        if (JSON.stringify(YAML.parse(text)) !== JSON.stringify(YAML.parse(printed))) text = printed;
+      } catch {
+        text = printed;
+      }
+      if (!text.endsWith("\n")) text += "\n";
+      if (/\r\n/.test(orig)) text = text.replace(/\r?\n/g, "\r\n");
+      if (bom) text = "\uFEFF" + text;
+      if (text === rawText) return false;
+      const tmp = file + ".tmp";
+      try {
+        let mode;
+        try {
+          mode = fs2.statSync(file).mode & 511;
+        } catch {
+        }
+        fs2.writeFileSync(tmp, text, mode ? { mode } : void 0);
+        loadConfig2(tmp);
+      } catch (e) {
+        try {
+          fs2.unlinkSync(tmp);
+        } catch {
+        }
+        fail(String(e.message).split(tmp).join(file));
+      }
+      try {
+        fs2.writeFileSync(file + ".bak", rawText);
+      } catch {
+      }
+      renameRetry(tmp, file);
+      return true;
+    }
+    var checkName = (name) => {
+      if (!NAME_RE.test(name)) fail(`invalid name "${name}": use letters, digits, '.', '_' or '-'`);
+    };
+    var exist = (what, name) => fail(`${what} "${name}" already exists`);
+    function readDoc(file) {
+      const doc = YAML.parseDocument(fs2.readFileSync(file, "utf8").replace(/^﻿/, ""));
+      if (doc.errors.length) fail(`${file}: ${doc.errors[0].message}`);
+      return doc;
+    }
+    function readEntry(file, section2, name, what) {
+      const doc = readDoc(file), root = isMap(doc.contents) ? doc.contents : null, m = root && section2(root);
+      const i = m ? find(m, name) : -1;
+      if (i < 0) throw Object.assign(new Error(`${what} "${name}" not found`), { notFound: true });
+      return nodeJS(doc, m.items[i].value);
+    }
+    var readSpec = (file, name) => specFromRaw(name, readEntry(file, (r) => servicesOf(r, false), name, "service"));
+    function readRuntime(file, name) {
+      const r = obj(readEntry(file, (r2) => runtimesOf(r2, false), name, "runtime")) || {};
+      return { name, type: str(r.type).toLowerCase() || inferType(name), home: str(r.home), bin: str(r.bin), env: envList(r.env) };
+    }
+    function renameRefs(svcs, key, from, to) {
+      for (const p of svcs.items) {
+        const m = p.value;
+        if (!isMap(m)) continue;
+        const j = find(m, key);
+        if (j < 0) continue;
+        const d = m.items[j].value;
+        if (isScalar(d)) {
+          if (str(d.value) === from) d.value = to;
+        } else if (isSeq(d)) {
+          for (const it of d.items) if (isScalar(it) && str(it.value) === from) it.value = to;
+        }
+      }
+    }
+    function saveService(file, oldName, s) {
+      s.name = str(s.name).trim();
+      checkName(s.name);
+      return edit(file, (doc, root) => {
+        const svcs = servicesOf(root);
+        let m;
+        if (!oldName) {
+          if (find(svcs, s.name) >= 0) exist("service", s.name);
+          m = addEntry(svcs, s.name);
+        } else {
+          const i = find(svcs, oldName);
+          if (i < 0) throw Object.assign(new Error(`service "${oldName}" not found`), { notFound: true });
+          if (s.name !== oldName) {
+            if (find(svcs, s.name) >= 0) exist("service", s.name);
+            svcs.items[i].key.value = s.name;
+            renameRefs(svcs, "depends_on", oldName, s.name);
+          }
+          m = svcs.items[i].value;
+          if (!isMap(m)) m = svcs.items[i].value = new YAMLMap();
+        }
+        applySpec(m, s);
+      });
+    }
+    function deleteService(file, name) {
+      return edit(file, (doc, root) => {
+        const svcs = servicesOf(root), i = find(svcs, name);
+        if (i < 0) throw Object.assign(new Error(`service "${name}" not found`), { notFound: true });
+        for (const p of svcs.items) {
+          if (keyOf(p) !== name && strList(nodeJS(doc, p.value) && nodeJS(doc, p.value).depends_on).includes(name)) fail(`"${keyOf(p)}" depends on "${name}"; remove that dependency first`);
+        }
+        svcs.items.splice(i, 1);
+        if (i === 0 && svcs.items.length && svcs.items[0].key) svcs.items[0].key.spaceBefore = false;
+      });
+    }
+    function reorderServices(file, names) {
+      if (!Array.isArray(names)) fail('expected {"services": [names]}');
+      return edit(file, (doc, root) => {
+        const svcs = servicesOf(root);
+        if (names.length !== svcs.items.length) fail(`order must list all ${svcs.items.length} services`);
+        const by = new Map(svcs.items.map((p) => [keyOf(p), p])), out = [];
+        const packed = !svcs.items.slice(1).some((p) => p.key && p.key.spaceBefore);
+        for (const n of names) {
+          const p = by.get(n);
+          if (!p) fail(`unknown or repeated service "${n}"`);
+          by.delete(n);
+          out.push(p);
+        }
+        out.forEach((p, i) => {
+          if (p.key) p.key.spaceBefore = i > 0 && !packed;
+        });
+        svcs.items = out;
+      });
+    }
+    function saveRuntime(file, oldName, s) {
+      const name = str(s.name).trim(), home = str(s.home).trim(), bin = str(s.bin).trim(), type = str(s.type).trim().toLowerCase();
+      checkName(name);
+      if (!RUNTIME_TYPES[type]) fail("type must be java, node or script");
+      if (!home) fail("home folder is required");
+      return edit(file, (doc, root) => {
+        const rts = runtimesOf(root, true);
+        let m;
+        if (!oldName) {
+          if (find(rts, name) >= 0) exist("runtime", name);
+          m = addEntry(rts, name);
+        } else {
+          const i = find(rts, oldName);
+          if (i < 0) throw Object.assign(new Error(`runtime "${oldName}" not found`), { notFound: true });
+          if (name !== oldName) {
+            if (find(rts, name) >= 0) exist("runtime", name);
+            rts.items[i].key.value = name;
+            const svcs = servicesOf(root, false);
+            if (svcs) renameRefs(svcs, "runtime", oldName, name);
+          }
+          m = rts.items[i].value;
+          if (!isMap(m)) m = rts.items[i].value = new YAMLMap();
+        }
+        const o = { order: RUNTIME_ORDER };
+        if (find(m, "type") >= 0 || inferType(name) !== type) setVal(m, "type", type, o);
+        setVal(m, "home", home, o);
+        setVal(m, "bin", nz(bin), o);
+        if (Array.isArray(s.env)) {
+          const env = envValue(s.env, "env");
+          setVal(m, "env", env.length ? entriesOf(env, env.length <= 3) : void 0, o);
+        }
+      });
+    }
+    function deleteRuntime(file, name, detach) {
+      return edit(file, (doc, root) => {
+        const rts = runtimesOf(root, false), i = rts ? find(rts, name) : -1;
+        if (i < 0) throw Object.assign(new Error(`runtime "${name}" not found`), { notFound: true });
+        const svcs = servicesOf(root, false);
+        if (svcs) {
+          const users = svcs.items.filter((p) => strList(nodeJS(doc, p.value) && nodeJS(doc, p.value).runtime).includes(name)).map(keyOf);
+          if (users.length) {
+            if (!detach) fail(`"${name}" is used by ${users.join(", ")}; remove it from those services first`);
+            for (const p of svcs.items) {
+              const m = p.value;
+              if (!isMap(m) || !users.includes(keyOf(p))) continue;
+              const left = strList(nodeJS(doc, m.items[find(m, "runtime")].value)).filter((x) => x !== name);
+              setVal(m, "runtime", left.length ? left : void 0, { scalarOne: true });
+            }
+          }
+        }
+        rts.items.splice(i, 1);
+        if (!rts.items.length) root.items.splice(find(root, "runtimes"), 1);
+      });
+    }
+    module2.exports = { readSpec, readRuntime, saveService, deleteService, reorderServices, saveRuntime, deleteRuntime, previewSpec, mergeLayout };
+  }
+});
+
+// src/detect.cjs
+var require_detect = __commonJS({
+  "src/detect.cjs"(exports2, module2) {
+    var fs2 = require("fs");
+    var path2 = require("path");
+    var { execFile: execFile2 } = require("child_process");
+    var { WIN: WIN2, fileExists, dirExists } = require_util();
+    var exists = (p) => {
+      try {
+        fs2.statSync(p);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    var readText = (p) => {
+      try {
+        return fs2.readFileSync(p, "utf8").replace(/^﻿/, "");
+      } catch {
+        return null;
+      }
+    };
+    var readdir = (d) => {
+      try {
+        return fs2.readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+      } catch {
+        return [];
+      }
+    };
+    var isDir = (dir, e) => e.isDirectory() || e.isSymbolicLink() && dirExists(path2.join(dir, e.name));
+    function parseXml(src) {
+      src = src.replace(/<!--[\s\S]*?-->/g, "").replace(/<\?[\s\S]*?\?>/g, "").replace(/<!DOCTYPE[^>]*>/gi, "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_, t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;"));
+      const root = { name: "", children: [], text: "" }, stack = [root], re = /<(\/?)([^\s>/]+)([^>]*?)(\/?)>|([^<]+)/g;
+      let m;
+      while (m = re.exec(src)) {
+        if (m[5] !== void 0) {
+          stack[stack.length - 1].text += m[5];
+          continue;
+        }
+        const name = m[2].replace(/^.*:/, "");
+        if (m[1]) {
+          if (stack.length < 2 || stack[stack.length - 1].name !== name) return null;
+          stack.pop();
+        } else {
+          const n = { name, children: [], text: "" };
+          stack[stack.length - 1].children.push(n);
+          if (!m[4]) stack.push(n);
+        }
+      }
+      if (stack.length !== 1 || root.children.length !== 1) return null;
+      const dec = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+      const fix = (n) => {
+        n.text = dec(n.text).trim();
+        n.children.forEach(fix);
+      };
+      fix(root.children[0]);
+      return root.children[0];
+    }
+    var kids = (n, name) => n ? n.children.filter((c) => c.name === name) : [];
+    var kid = (n, name) => kids(n, name)[0];
+    var kidText = (n, name) => {
+      const k = kid(n, name);
+      return k ? k.text : "";
+    };
+    var via = (n, ...names) => names.reduce((list, nm) => list.flatMap((x) => kids(x, nm)), [n]);
+    function readPom(dir) {
+      const src = readText(path2.join(dir, "pom.xml"));
+      if (src === null) return null;
+      const x = parseXml(src);
+      if (!x || x.name !== "project") return null;
+      const props = kid(x, "properties");
+      return {
+        artifactId: kidText(x, "artifactId"),
+        packaging: kidText(x, "packaging"),
+        parentArtifact: kidText(kid(x, "parent"), "artifactId"),
+        modules: via(x, "modules", "module").map((n) => n.text),
+        java: [kidText(props, "java.version"), kidText(props, "maven.compiler.release"), kidText(props, "maven.compiler.source")],
+        plugins: via(x, "build", "plugins", "plugin").map((n) => kidText(n, "artifactId")),
+        deps: via(x, "dependencies", "dependency").map((n) => kidText(n, "artifactId"))
+      };
+    }
+    function javaVersion(p) {
+      for (let v of p.java) {
+        v = v.trim().replace(/^1\./, "");
+        if (v && !v.includes("${")) return v;
+      }
+      return "";
+    }
+    var hasBootPlugin = (p) => p.plugins.includes("spring-boot-maven-plugin");
+    var usesBoot = (p) => p.parentArtifact === "spring-boot-starter-parent" || hasBootPlugin(p) || p.deps.some((d) => d.startsWith("spring-boot-starter"));
+    var PKG_RE = /^\s*package\s+([\w.]+)/m;
+    function mainClass(dir) {
+      let seen = 0;
+      for (const src of ["src/main/java", "src/main/kotlin"]) {
+        let found = "";
+        const walk = (d) => {
+          for (const e of readdir(d)) {
+            if (found || seen > 5e3) return;
+            const p = path2.join(d, e.name);
+            if (e.isDirectory()) {
+              walk(p);
+              continue;
+            }
+            const ext = path2.extname(e.name);
+            if (ext !== ".java" && ext !== ".kt") continue;
+            seen++;
+            const t = readText(p);
+            if (t === null || !t.includes("@SpringBootApplication")) continue;
+            const pk = PKG_RE.exec(t);
+            found = (pk ? pk[1] + "." : "") + e.name.slice(0, -ext.length);
+          }
+        };
+        walk(path2.join(dir, ...src.split("/")));
+        if (found) return found;
+      }
+      return "";
+    }
+    var PROP_PORT = /^\s*server\.port\s*[=:]\s*(?:\$\{[^:}]*:)?(\d+)/m;
+    var YML_PORT = /^\s+port:\s*["']?(?:\$\{[^:}]*:)?(\d+)/;
+    var PROFILE_RE = /^application-([\w.-]+)\.(properties|ya?ml)$/;
+    function springResources(dir) {
+      const res = path2.join(dir, "src", "main", "resources");
+      let port = 0;
+      const props = readText(path2.join(res, "application.properties"));
+      if (props !== null) {
+        const m = PROP_PORT.exec(props);
+        if (m) port = Number(m[1]);
+      }
+      for (const name of ["application.yml", "application.yaml"]) {
+        if (port) break;
+        const t = readText(path2.join(res, name));
+        if (t === null) continue;
+        let inServer = false;
+        for (const line of t.split(/\r?\n/)) {
+          if (!line.trim() || line.trim().startsWith("#")) continue;
+          if (!line.startsWith(" ") && !line.startsWith("	")) {
+            inServer = line.startsWith("server:");
+            continue;
+          }
+          if (inServer) {
+            const m = YML_PORT.exec(line);
+            if (m) {
+              port = Number(m[1]);
+              break;
+            }
+          }
+        }
+      }
+      if (!port) port = 8080;
+      const profiles = [];
+      for (const e of readdir(res)) {
+        const m = PROFILE_RE.exec(e.name);
+        if (m && !profiles.includes(m[1])) profiles.push(m[1]);
+      }
+      return [port, profiles];
+    }
+    function spring(root) {
+      const rp = readPom(root);
+      if (!rp) return null;
+      const s = { artifactId: rp.artifactId, javaVersion: javaVersion(rp), wrapper: exists(path2.join(root, "mvnw")) || exists(path2.join(root, "mvnw.cmd")), modules: [] };
+      const walk = (dir, rel, p, depth) => {
+        if (p.packaging !== "pom") {
+          const main = mainClass(dir);
+          if (main || usesBoot(p) && hasBootPlugin(p)) {
+            const m = { path: rel, artifactId: p.artifactId };
+            if (main) m.mainClass = main;
+            const [port, profiles] = springResources(dir);
+            m.port = port;
+            if (profiles.length) m.profiles = profiles;
+            s.modules.push(m);
+          }
+        }
+        if (depth >= 3) return;
+        for (const mod of p.modules) {
+          const cd = path2.join(dir, ...mod.split("/")), cp = readPom(cd);
+          if (!cp) continue;
+          if (!s.javaVersion) s.javaVersion = javaVersion(cp);
+          walk(cd, path2.posix.join(rel, mod), cp, depth + 1);
+        }
+      };
+      walk(root, "", rp, 0);
+      if (!s.javaVersion) delete s.javaVersion;
+      return s;
+    }
+    var PORT_ARG = /(?:--port[= ]|-p\s+)(\d{2,5})/;
+    function guessPort(cmd2) {
+      const m = PORT_ARG.exec(cmd2);
+      if (m) return Number(m[1]);
+      if (cmd2.includes("vite")) return 5173;
+      if (cmd2.includes("ng serve")) return 4200;
+      if (cmd2.includes("next dev") || cmd2.includes("react-scripts start")) return 3e3;
+      return 0;
+    }
+    var rank = (s) => s === "dev" ? 0 : s === "start" ? 1 : s === "serve" ? 2 : ["start:dev", "dev:local", "start:local"].includes(s) ? 3 : 10;
+    function node(dir) {
+      const t = readText(path2.join(dir, "package.json"));
+      if (t === null) return null;
+      let pj;
+      try {
+        pj = JSON.parse(t);
+      } catch {
+        return null;
+      }
+      if (!pj || typeof pj !== "object") return null;
+      const commands = {};
+      if (pj.scripts && typeof pj.scripts === "object") {
+        for (const [k, v] of Object.entries(pj.scripts)) if (typeof v === "string") commands[k] = v;
+      }
+      const n = { name: typeof pj.name === "string" ? pj.name : "", scripts: [], commands, packageManager: "npm", ports: {}, installed: exists(path2.join(dir, "node_modules")) };
+      const ev = pj.engines && typeof pj.engines.node === "string" ? pj.engines.node : "";
+      const nvm = readText(path2.join(dir, ".nvmrc"));
+      const nv = nvm !== null ? nvm.trim() : ev;
+      if (nv) n.nodeVersion = nv;
+      if (exists(path2.join(dir, "pnpm-lock.yaml"))) n.packageManager = "pnpm";
+      else if (exists(path2.join(dir, "yarn.lock"))) n.packageManager = "yarn";
+      for (const [name, cmd2] of Object.entries(commands)) {
+        n.scripts.push(name);
+        const p = guessPort(cmd2);
+        if (p > 0) n.ports[name] = p;
+      }
+      n.scripts.sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0));
+      return n;
+    }
+    var SCRIPT_EXT = [".bat", ".cmd", ".ps1", ".sh", ".py"];
+    var scripts = (dir) => readdir(dir).filter((e) => !isDir(dir, e) && SCRIPT_EXT.includes(path2.extname(e.name).toLowerCase()) && !e.name.startsWith("mvnw") && !e.name.startsWith("gradlew")).map((e) => e.name);
+    function jars(dir) {
+      const out = [];
+      for (const sub of ["", "target", "build/libs"]) {
+        const d = path2.join(dir, ...sub.split("/").filter(Boolean));
+        for (const e of readdir(d)) {
+          const n = e.name;
+          if (isDir(d, e) || !n.endsWith(".jar") || n.startsWith("original-")) continue;
+          const base = n.slice(0, -4);
+          if (["-sources", "-javadoc", "-tests", "-plain"].some((x) => base.endsWith(x))) continue;
+          out.push(path2.posix.join(sub, n));
+        }
+      }
+      return out;
+    }
+    function detectDir(dir) {
+      const r = { dir, exists: false, suggested: "custom" };
+      if (!dirExists(dir)) return r;
+      r.exists = true;
+      const sp = spring(dir), nd = node(dir), sc = scripts(dir), jr = jars(dir);
+      if (sp) r.spring = sp;
+      if (nd) r.node = nd;
+      if (sc.length) r.scripts = sc;
+      if (jr.length) r.jars = jr;
+      if (sp && sp.modules.length) r.suggested = "spring-boot";
+      else if (nd && nd.scripts.length) r.suggested = "node";
+      else if (sc.length) r.suggested = "script";
+      else if (jr.length) r.suggested = "jar";
+      return r;
+    }
+    var SKIP_DIRS = /* @__PURE__ */ new Set(["node_modules", "target", "build", "dist", "out", "bin", "obj"]);
+    function roots() {
+      if (!WIN2) return [];
+      const out = [];
+      for (let c = 65; c <= 90; c++) {
+        const d = String.fromCharCode(c) + ":\\";
+        try {
+          fs2.statSync(d);
+          out.push(d);
+        } catch {
+        }
+      }
+      return out;
+    }
+    var cmpLower = (a, b) => {
+      a = a.toLowerCase();
+      b = b.toLowerCase();
+      return a < b ? -1 : a > b ? 1 : 0;
+    };
+    function listDir(dir) {
+      const l = { path: dir, dirs: [], files: [] };
+      const rs = roots();
+      if (rs.length) l.roots = rs;
+      const parent = path2.dirname(dir);
+      if (parent !== dir) l.parent = parent;
+      let entries;
+      try {
+        entries = fs2.readdirSync(dir, { withFileTypes: true });
+      } catch (e) {
+        l.error = e.code ? `${e.code}: cannot read ${dir}` : e.message;
+        return l;
+      }
+      for (const e of entries) {
+        const n = e.name, ext = path2.extname(n).toLowerCase(), dirLike = isDir(dir, e);
+        if (!dirLike && (ext === ".yml" || ext === ".yaml") && !n.startsWith(".")) {
+          if (e.isFile() || e.isSymbolicLink()) l.files.push(n);
+          continue;
+        }
+        if (!dirLike || n.startsWith(".") || n.startsWith("$") || SKIP_DIRS.has(n)) continue;
+        const en = { name: n }, p = path2.join(dir, n);
+        if (exists(path2.join(p, "pom.xml"))) en.kind = "maven";
+        else if (exists(path2.join(p, "package.json"))) en.kind = "node";
+        l.dirs.push(en);
+      }
+      l.files.sort(cmpLower);
+      l.dirs.sort((a, b) => cmpLower(a.name, b.name));
+      return l;
+    }
+    function listTools(dir) {
+      const out = [], seen = /* @__PURE__ */ new Set();
+      for (const e of readdir(dir)) {
+        const p = path2.join(dir, e.name);
+        let st;
+        try {
+          st = fs2.statSync(p);
+        } catch {
+          continue;
+        }
+        if (st.isDirectory()) continue;
+        let name = e.name;
+        if (WIN2) {
+          const ext = path2.extname(name).toLowerCase();
+          if (![".exe", ".cmd", ".bat", ".ps1"].includes(ext)) continue;
+          name = name.slice(0, -ext.length);
+        } else if (!(st.mode & 73)) continue;
+        if (seen.has(WIN2 ? name.toLowerCase() : name)) continue;
+        seen.add(WIN2 ? name.toLowerCase() : name);
+        out.push(name);
+        if (out.length === 12) break;
+      }
+      return out;
+    }
+    function runtimeVersion(exe, type, vars) {
+      const arg = type === "java" ? "-version" : type === "node" ? "--version" : "";
+      if (!arg) return Promise.resolve("");
+      return new Promise((ok) => {
+        const env = { ...process.env, ...vars }, done = (e, so, se) => {
+          for (let line of `${so || ""}
+${se || ""}`.split("\n")) {
+            line = line.trim();
+            if (line && !line.startsWith("Picked up") && /\d+(\.\d+)+/.test(line)) return ok(line);
+          }
+          ok("");
+        };
+        const opts = { env, timeout: 15e3, windowsHide: true };
+        try {
+          if (WIN2 && /\.(cmd|bat)$/i.test(exe)) execFile2(process.env.COMSPEC || "cmd.exe", ["/d", "/s", "/c", `""${exe}" ${arg}"`], { ...opts, windowsVerbatimArguments: true }, done);
+          else execFile2(exe, [arg], opts, done);
+        } catch (e) {
+          ok("");
+        }
+      });
+    }
+    module2.exports = { detectDir, listDir, roots, listTools, runtimeVersion };
+  }
+});
+
+// src/api.cjs
+var require_api = __commonJS({
+  "src/api.cjs"(exports2, module2) {
+    var fs2 = require("fs");
+    var { WIN: WIN2, resolvePath, dirExists } = require_util();
+    var { normalizeRuntime, checkRuntime: checkRuntime2, binDir, executable, runtimeVars } = require_config();
+    var edit = require_edit();
+    var { detectDir, listDir, listTools, runtimeVersion } = require_detect();
+    var MAX_BODY = 1 << 20;
+    var PATHS = [/^\/api\/config\//, /^\/api\/preview$/, /^\/api\/detect$/, /^\/api\/fs\//, /^\/api\/runtimes\/probe$/];
+    function createApi2(ctx) {
+      const readBody = (req) => new Promise((ok, no) => {
+        let n = 0;
+        const chunks = [];
+        req.on("data", (c) => {
+          n += c.length;
+          if (n > MAX_BODY) {
+            no(Object.assign(new Error("request too large"), { status: 413 }));
+            req.destroy();
+          } else chunks.push(c);
+        });
+        req.on("end", () => {
+          const s = Buffer.concat(chunks).toString("utf8");
+          try {
+            ok(s.trim() ? JSON.parse(s) : {});
+          } catch (e) {
+            no(Object.assign(new Error("bad JSON: " + e.message), { status: 400 }));
+          }
+        });
+        req.on("error", no);
+      });
+      const resolve = (p) => {
+        p = String(p || "").trim();
+        if (WIN2 && /^[A-Za-z]:$/.test(p)) p += "\\";
+        return resolvePath(ctx.base, p);
+      };
+      const isActive = (n) => {
+        const s = ctx.svcs()[n];
+        return !!s && s.active();
+      };
+      async function probe(q) {
+        let rt;
+        try {
+          rt = normalizeRuntime(ctx.base, "probe", { type: q.get("type") || "", home: q.get("home") || "", bin: q.get("bin") || "" });
+        } catch (e) {
+          return { error: e.message };
+        }
+        const res = { home: rt.home, binDir: binDir(rt) }, exe = executable(rt);
+        if (exe) res.exe = exe;
+        res.exists = dirExists(rt.home);
+        const err = checkRuntime2(rt);
+        if (err) {
+          res.error = err;
+          return res;
+        }
+        if (rt.type === "script") {
+          const t = listTools(res.binDir);
+          if (t.length) res.tools = t;
+          return res;
+        }
+        const v = await runtimeVersion(exe, rt.type, runtimeVars(rt));
+        if (v) res.version = v;
+        return res;
+      }
+      async function handle(req, res, u, json) {
+        const p = u.pathname;
+        if (!PATHS.some((r) => r.test(p))) return false;
+        const origin = req.headers.origin;
+        let foreign = req.headers["sec-fetch-site"] === "cross-site";
+        if (origin) {
+          try {
+            foreign = foreign || new URL(origin).host !== req.headers.host;
+          } catch {
+            foreign = true;
+          }
+        }
+        if (foreign) return json({ error: "cross-origin request refused" }, 403), true;
+        const m = req.method;
+        let mt;
+        const name = (i) => decodeURIComponent(mt[i]);
+        const fail = (e, code) => json({ error: e.message }, e.status || (e.notFound ? 404 : e.badRequest ? 400 : code || 400));
+        const done = async (write, result) => {
+          try {
+            write();
+          } catch (e) {
+            return fail(e);
+          }
+          try {
+            await ctx.reload();
+          } catch (e) {
+            return json({ error: e.message }, 500);
+          }
+          return json(result ? result() : ctx.state());
+        };
+        try {
+          if (p === "/api/config/services" && m === "POST") {
+            const s = await readBody(req);
+            return await done(() => edit.saveService(ctx.file, "", s)), true;
+          }
+          if (mt = p.match(/^\/api\/config\/services\/([^/]+)$/)) {
+            const n = name(1);
+            if (m === "GET") {
+              try {
+                json(edit.readSpec(ctx.file, n));
+              } catch (e) {
+                fail(e, 404);
+              }
+              ;
+              return true;
+            }
+            if (m === "PUT") {
+              const s = await readBody(req);
+              s.name = String(s.name || "").trim();
+              if (s.name !== n && isActive(n)) return json({ error: `stop ${n} before renaming it` }, 409), true;
+              return await done(() => edit.saveService(ctx.file, n, s)), true;
+            }
+            if (m === "DELETE") return await done(() => edit.deleteService(ctx.file, n)), true;
+          }
+          if ((mt = p.match(/^\/api\/config\/services\/([^/]+)\/changes-ignore$/)) && (m === "POST" || m === "DELETE")) {
+            const n = name(1), add = m === "POST", b = await readBody(req), pat = String(b.pattern || "").trim();
+            if (!pat) return json({ error: "expected a pattern" }, 400), true;
+            let spec;
+            try {
+              spec = edit.readSpec(ctx.file, n);
+            } catch (e) {
+              return fail(e, 404), true;
+            }
+            const had = spec.changesIgnore.includes(pat);
+            if (!add && !had) return json({ error: `${n} has no pattern "${pat}" (edit the service to change its patterns)` }, 404), true;
+            spec.changesIgnore = add ? had ? spec.changesIgnore : [...spec.changesIgnore, pat] : spec.changesIgnore.filter((x) => x !== pat);
+            return await done(() => edit.saveService(ctx.file, n, spec), () => ({ changesIgnore: spec.changesIgnore.length ? spec.changesIgnore : null })), true;
+          }
+          if (p === "/api/config/order" && m === "PUT") {
+            const b = await readBody(req);
+            return await done(() => edit.reorderServices(ctx.file, b.services), () => ({ ok: true })), true;
+          }
+          if (p === "/api/config/runtimes" && m === "POST") {
+            const s = await readBody(req);
+            return await done(() => edit.saveRuntime(ctx.file, "", s)), true;
+          }
+          if (mt = p.match(/^\/api\/config\/runtimes\/([^/]+)$/)) {
+            const n = name(1);
+            if (m === "GET") {
+              try {
+                json(edit.readRuntime(ctx.file, n));
+              } catch (e) {
+                fail(e, 404);
+              }
+              ;
+              return true;
+            }
+            if (m === "PUT") {
+              const s = await readBody(req);
+              return await done(() => edit.saveRuntime(ctx.file, n, s)), true;
+            }
+            if (m === "DELETE") return await done(() => edit.deleteRuntime(ctx.file, n, u.searchParams.get("detach") === "1")), true;
+          }
+          if (p === "/api/runtimes/probe" && m === "GET") return json(await probe(u.searchParams)), true;
+          if (p === "/api/preview" && m === "POST") {
+            const s = await readBody(req);
+            return json(edit.previewSpec(ctx.base, s)), true;
+          }
+          if (p === "/api/detect" && m === "GET") return json(detectDir(resolve(u.searchParams.get("dir")))), true;
+          if (p === "/api/fs/check" && m === "GET") {
+            const q = resolve(u.searchParams.get("path"));
+            let st;
+            try {
+              st = fs2.statSync(q);
+            } catch {
+            }
+            return json({ path: q, exists: !!st, dir: !!st && st.isDirectory() }), true;
+          }
+          if (p === "/api/fs/list" && m === "GET") {
+            const q = (u.searchParams.get("path") || "").trim();
+            return json(listDir(q ? resolve(q) : ctx.base)), true;
+          }
+        } catch (e) {
+          return json({ error: e.message }, e.status || 400), true;
+        }
+        return json({ error: "not implemented in the node poc" }, 501), true;
+      }
+      return { handle };
+    }
+    module2.exports = { createApi: createApi2 };
   }
 });
 
@@ -12198,6 +13329,7 @@ var { spawn, execFile } = require("child_process");
 var { load: loadConfig, environ, checkRuntime } = require_config();
 var { Service } = require_service();
 var { stripAnsi } = require_util();
+var { createApi } = require_api();
 var { WebSocketServer } = require_ws();
 var nodePty = null;
 try {
@@ -12291,6 +13423,10 @@ function serve() {
     console.error(e.message);
     process.exit(1);
   }
+  const configApi = createApi({ file: cfgFile, base, svcs: () => svcs, state, reload: async () => {
+    await load();
+    send(snapshot(false));
+  } });
   function resolve(target) {
     if (target === "all") return Object.values(svcs);
     if (svcs[target]) return [svcs[target]];
@@ -12466,6 +13602,7 @@ function serve() {
         send(snapshot(false));
         return json(state());
       }
+      if (await configApi.handle(req, res, u, json)) return;
       if (p === "/api/workspaces") return json({ workspaces: [] });
       if (p === "/api/terms/shells") return json(shells());
       if (p === "/api/terms" && req.method === "GET") return json([...terms.values()].map(termInfo));

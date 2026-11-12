@@ -182,4 +182,4 @@ function environ(cfg, sc) {
   return out
 }
 
-module.exports = { load, environ, binDir, checkRuntime, NAME_RE }
+module.exports = { load, environ, binDir, executable, checkRuntime, runtimeVars, normalizeRuntime, normalizeService, inferType, NAME_RE, RUNTIME_TYPES }

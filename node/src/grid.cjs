@@ -4,6 +4,7 @@ const { spawn, execFile } = require('child_process')
 const { load: loadConfig, environ, checkRuntime } = require('./config.cjs')
 const { Service } = require('./service.cjs')
 const { stripAnsi } = require('./util.cjs')
+const { createApi } = require('./api.cjs')
 const { WebSocketServer } = require('ws')
 let nodePty = null
 try { nodePty = require('node-pty') } catch (e) { console.error('node-pty not available, terminals use plain pipes:', e.message.split('\n')[0]) }
@@ -63,6 +64,9 @@ function serve() {
     await Promise.all(Object.values(old).map(v => v.stop().catch(() => {})))
   }
   try { cfg = loadConfig(cfgFile); for (const s of cfg.services) svcs[s.name] = new Service(mgr, s) } catch (e) { console.error(e.message); process.exit(1) }
+
+  // editing grid.yaml, wizard helpers, folder picker (api.cjs); after a write the file is read again and the UI gets a snapshot
+  const configApi = createApi({ file: cfgFile, base, svcs: () => svcs, state, reload: async () => { await load(); send(snapshot(false)) } })
 
   // "all", a service name or a group name
   function resolve(target) {
@@ -161,6 +165,7 @@ function serve() {
         if (b.logFiles !== undefined) settings.logFiles = !!b.logFiles // remembered only: the node runner writes no log files
         send(snapshot(false)); return json(state())
       }
+      if (await configApi.handle(req, res, u, json)) return
       if (p === '/api/workspaces') return json({ workspaces: [] })
       if (p === '/api/terms/shells') return json(shells())
       if (p === '/api/terms' && req.method === 'GET') return json([...terms.values()].map(termInfo))
