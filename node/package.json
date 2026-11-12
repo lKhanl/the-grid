@@ -1,12 +1,13 @@
 {
-  "name": "grid-node-poc",
+  "name": "the-grid",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
     "build": "node build.cjs",
     "release": "node build.cjs release",
-    "test": "node --test test/db.test.cjs"
+    "test": "node --test test/db.test.cjs test/update.test.cjs",
+    "dist": "node build.cjs dist"
   },
   "keywords": [],
   "author": "",

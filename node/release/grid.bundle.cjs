@@ -13136,6 +13136,512 @@ ${k}: ${val}`;
   }
 });
 
+// src/version.cjs
+var require_version = __commonJS({
+  "src/version.cjs"(exports2, module2) {
+    module2.exports = true ? "1.0.0" : null.version;
+  }
+});
+
+// src/update.cjs
+var require_update = __commonJS({
+  "src/update.cjs"(exports2, module2) {
+    var fs2 = require("fs");
+    var path2 = require("path");
+    var http2 = require("http");
+    var https = require("https");
+    var crypto = require("crypto");
+    var readline = require("readline");
+    var { pipeline } = require("stream/promises");
+    var { spawn: spawn2 } = require("child_process");
+    var { gridDir: gridDir2 } = require_workspaces();
+    var WIN2 = process.platform === "win32";
+    var UA = "the-grid-updater";
+    var INSTALLER = "the-grid-node-installer.cjs";
+    var MANIFEST_REF = "refs/heads/master";
+    var BUNDLE = "grid.bundle.cjs";
+    var LIMITS = { files: 500, file: 64 << 20, total: 256 << 20, manifest: 1 << 20 };
+    var MAX_REDIRECTS = 5;
+    var IDLE_MS = 3e4;
+    var DIR_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
+    var WRAPPER_RE = /^[A-Za-z0-9_-]+\.cmd$/;
+    var PART_RE = /^[A-Za-z0-9._-]+$/;
+    var RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+    var ERR_NO_CREDS = "no Bitbucket credentials (run the installer once, or set GRID_USER and GRID_TOKEN)";
+    var ERR_AUTH = "Bitbucket rejected the credentials (wrong user code or PAT, or no read access)";
+    var UpdateError = class extends Error {
+      constructor(msg, extra) {
+        super(msg);
+        this.name = "UpdateError";
+        Object.assign(this, extra);
+      }
+    };
+    function newer(remote, local) {
+      const parts = (s) => String(s).trim().replace(/^v/i, "").split(/[+\- ]/)[0].split(".").map((x) => /^\d+$/.test(x) ? parseInt(x, 10) : 0);
+      const a = parts(remote), b = parts(local);
+      for (let i = 0; i < Math.max(a.length, b.length); i++) {
+        const x = a[i] || 0, y = b[i] || 0;
+        if (x !== y) return x > y;
+      }
+      return false;
+    }
+    var nodeDir = () => path2.join(gridDir2(), "node");
+    var infoFile = () => path2.join(nodeDir(), "install.json");
+    var credFile = () => path2.join(gridDir2(), "credentials");
+    var appDir = () => path2.join(gridDir2(), "app");
+    function readInfo() {
+      try {
+        const j = JSON.parse(fs2.readFileSync(infoFile(), "utf8"));
+        if (!j || typeof j !== "object" || typeof j.dir !== "string" || !DIR_RE.test(j.dir)) return null;
+        return { base: typeof j.base === "string" ? j.base : "", dir: j.dir, version: String(j.version || ""), wrapper: WRAPPER_RE.test(j.wrapper || "") ? j.wrapper : "grid.cmd" };
+      } catch {
+        return null;
+      }
+    }
+    var isLoopback = (h) => h === "localhost" || h === "[::1]" || /^127(\.\d{1,3}){3}$/.test(h);
+    var urlAllowed = (u) => u.protocol === "https:" || u.protocol === "http:" && isLoopback(u.hostname);
+    function distBase(info) {
+      const b = (process.env.GRID_DIST_URL || "").trim() || info && info.base || "";
+      if (!b) return null;
+      try {
+        const u = new URL(b);
+        if (!urlAllowed(u) || u.username || u.password) return null;
+        return b.replace(/\/+$/, "");
+      } catch {
+        return null;
+      }
+    }
+    function loadCreds() {
+      const u = (process.env.GRID_USER || "").trim(), t = (process.env.GRID_TOKEN || "").trim();
+      if (u && t) return { user: u, token: t };
+      try {
+        const j = JSON.parse(fs2.readFileSync(credFile(), "utf8"));
+        if (j && j.user && j.token) return { user: String(j.user), token: String(j.token) };
+      } catch {
+      }
+      return null;
+    }
+    var authHeader = (c) => "Basic " + Buffer.from(c.user + ":" + c.token, "utf8").toString("base64");
+    function rawUrl(base, file, ref) {
+      return base.replace(/\/+$/, "") + "/" + String(file).split("/").map(encodeURIComponent).join("/") + "?at=" + encodeURIComponent(ref);
+    }
+    function validateManifest(m) {
+      const bad = (why) => {
+        throw new UpdateError("manifest.json: " + why);
+      };
+      if (!m || typeof m !== "object" || Array.isArray(m)) bad("unexpected format");
+      const tag = String(m.tag || "");
+      if (!/^[A-Za-z0-9._/-]+$/.test(tag)) bad('invalid "tag"');
+      let version = String(m.version || "").trim() || tag.replace(/^v/, "");
+      if (!DIR_RE.test(version) || version.length > 64) bad('invalid "version"');
+      if (!Array.isArray(m.files) || !m.files.length) bad('"files" must be a non-empty list');
+      if (m.files.length > LIMITS.files) bad(`too many files (max ${LIMITS.files})`);
+      const seen = /* @__PURE__ */ new Set(), dirs = /* @__PURE__ */ new Set(), files = [];
+      let total = 0;
+      for (const f of m.files) {
+        if (!f || typeof f !== "object") bad("invalid file entry");
+        const p = f.path;
+        if (typeof p !== "string" || !p) bad('invalid file "path"');
+        if (p.startsWith("/") || p.includes("\\") || /^[A-Za-z]:/.test(p)) bad(`invalid path "${p}" (absolute or backslash)`);
+        const parts = p.split("/");
+        for (const x of parts) {
+          if (x === "" || x === "." || x === ".." || !PART_RE.test(x) || x.endsWith(".") || RESERVED.test(x)) bad(`invalid path "${p}"`);
+        }
+        const key = p.toLowerCase();
+        if (seen.has(key)) bad(`duplicate path "${p}"`);
+        seen.add(key);
+        for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/").toLowerCase());
+        if (!/^[0-9a-fA-F]{64}$/.test(String(f.sha256 || ""))) bad(`"${p}": sha256 must be 64 hex digits`);
+        if (!Number.isInteger(f.size) || f.size < 0 || f.size > LIMITS.file) bad(`"${p}": invalid size`);
+        total += f.size;
+        files.push({ path: p, sha256: f.sha256.toLowerCase(), size: f.size });
+      }
+      for (const d of dirs) if (seen.has(d)) bad(`"${d}" is both a file and a folder`);
+      if (total > LIMITS.total) bad("total size too large");
+      if (!seen.has(BUNDLE)) bad(`"${BUNDLE}" is not in the list`);
+      return { version, tag, files, total };
+    }
+    function deadline(ms) {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(new Error(`timed out (${ms >= 1e3 ? ms / 1e3 + " s" : ms + " ms"})`)), ms);
+      return { signal: ac.signal, done: () => clearTimeout(t) };
+    }
+    var mapAbort = (e, ctx) => ctx.signal && ctx.signal.aborted ? ctx.signal.reason : e && e.message === "aborted" ? new Error("connection lost during the download") : e;
+    function get(url, ctx, redirects = 0) {
+      return new Promise((resolve, reject) => {
+        let u;
+        try {
+          u = new URL(url);
+        } catch (e) {
+          return reject(new UpdateError("invalid address"));
+        }
+        const file = path2.posix.basename(u.pathname);
+        if (!urlAllowed(u)) return reject(new UpdateError(`${u.protocol}//${u.host} is not allowed (https is required)`));
+        const headers = { "User-Agent": UA };
+        if (ctx.auth && u.host === ctx.host) headers.Authorization = ctx.auth;
+        const req = (u.protocol === "http:" ? http2 : https).get(url, { headers, signal: ctx.signal }, (res) => {
+          const code = res.statusCode;
+          if (code >= 300 && code < 400 && res.headers.location) {
+            res.resume();
+            if (redirects >= MAX_REDIRECTS) return reject(new UpdateError("too many redirects"));
+            let next;
+            try {
+              next = new URL(res.headers.location, url).toString();
+            } catch {
+              return reject(new UpdateError("invalid redirect"));
+            }
+            return resolve(get(next, ctx, redirects + 1));
+          }
+          if (code === 401 || code === 403) {
+            res.resume();
+            return reject(new UpdateError(`${ERR_AUTH} [HTTP ${code}]`, { auth: true }));
+          }
+          if (code !== 200) {
+            res.resume();
+            return reject(new UpdateError(`${file}: HTTP ${code}`, { httpStatus: code }));
+          }
+          if (String(res.headers["content-type"] || "").includes("text/html")) {
+            res.resume();
+            return reject(new UpdateError(`${ERR_AUTH} [got a sign-in page]`, { auth: true }));
+          }
+          resolve(res);
+        });
+        req.setTimeout(IDLE_MS, () => req.destroy(new Error(`timed out (${IDLE_MS / 1e3} s without data)`)));
+        req.on("error", (e) => reject(mapAbort(e, ctx)));
+      });
+    }
+    async function readBody(res, max, ctx) {
+      const chunks = [];
+      let n = 0;
+      try {
+        for await (const c of res) {
+          chunks.push(c);
+          n += c.length;
+          if (n > max) {
+            res.destroy();
+            break;
+          }
+        }
+      } catch (e) {
+        throw mapAbort(e, ctx);
+      }
+      return Buffer.concat(chunks).subarray(0, max);
+    }
+    function explain(e) {
+      const code = e && e.code || "";
+      if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY|ISSUER/.test(code)) {
+        return `${e.message} (certificate not trusted: set NODE_EXTRA_CA_CERTS to the corporate CA file, or use node --use-system-ca on Node 22+)`;
+      }
+      return String(e && e.message ? e.message : e).replace(/\s+/g, " ");
+    }
+    async function fetchManifest(base, creds, ms) {
+      const dl = deadline(ms), ctx = { auth: authHeader(creds), host: new URL(base).host, signal: dl.signal };
+      try {
+        const res = await get(rawUrl(base, "manifest.json", MANIFEST_REF), ctx);
+        const body = await readBody(res, LIMITS.manifest, ctx);
+        let m;
+        try {
+          m = JSON.parse(body.toString("utf8"));
+        } catch (e) {
+          throw new UpdateError("manifest.json is not valid JSON: " + e.message);
+        }
+        return validateManifest(m);
+      } finally {
+        dl.done();
+      }
+    }
+    function sleepSync(ms) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    }
+    function renameRetry(from, to) {
+      for (let i = 0; ; i++) {
+        try {
+          return fs2.renameSync(from, to);
+        } catch (e) {
+          if (i >= 4 || !["EPERM", "EBUSY", "EACCES"].includes(e.code)) throw e;
+          sleepSync(200);
+        }
+      }
+    }
+    function writeAtomic(file, text) {
+      const tmp = file + ".tmp-" + process.pid;
+      fs2.mkdirSync(path2.dirname(file), { recursive: true });
+      fs2.writeFileSync(tmp, text);
+      try {
+        renameRetry(tmp, file);
+      } catch (e) {
+        try {
+          fs2.unlinkSync(tmp);
+        } catch {
+        }
+        ;
+        throw e;
+      }
+    }
+    function wrapperText(dirName) {
+      return '@echo off\r\nnode "' + path2.join(nodeDir(), dirName, BUNDLE).replace(/%/g, "%%") + '" %*\r\n';
+    }
+    function writeWrapper(info) {
+      const file = path2.join(appDir(), info.wrapper), text = wrapperText(info.dir);
+      try {
+        if (fs2.readFileSync(file, "utf8") === text) return;
+      } catch {
+      }
+      writeAtomic(file, text);
+    }
+    async function install(m, base, creds, info, opts = {}) {
+      const root = nodeDir(), dl = deadline(opts.timeout || 10 * 60 * 1e3);
+      const ctx = { auth: authHeader(creds), host: new URL(base).host, signal: dl.signal };
+      const stage = path2.join(root, `.tmp-${process.pid}-${Date.now()}`);
+      fs2.mkdirSync(stage, { recursive: true });
+      try {
+        for (const f of m.files) {
+          const dest = path2.join(stage, ...f.path.split("/"));
+          fs2.mkdirSync(path2.dirname(dest), { recursive: true });
+          let res;
+          try {
+            res = await get(rawUrl(base, f.path, "refs/tags/" + m.tag), ctx);
+          } catch (e) {
+            throw e instanceof UpdateError && e.httpStatus ? new UpdateError(`${f.path}: HTTP ${e.httpStatus}`, e) : e;
+          }
+          const hash = crypto.createHash("sha256");
+          let size = 0;
+          try {
+            await pipeline(res, async function* (src) {
+              for await (const c of src) {
+                hash.update(c);
+                size += c.length;
+                if (size > f.size) throw new UpdateError(`${f.path}: larger than the manifest says (${f.size} bytes)`);
+                yield c;
+              }
+            }, fs2.createWriteStream(dest, { flags: "wx" }));
+          } catch (e) {
+            throw mapAbort(e, ctx);
+          }
+          const got = hash.digest("hex");
+          if (got !== f.sha256) throw new UpdateError(`${f.path}: SHA256 mismatch: expected ${f.sha256}, got ${got}`);
+          if (size !== f.size) throw new UpdateError(`${f.path}: size mismatch: expected ${f.size}, got ${size}`);
+          if (opts.onFile) opts.onFile(f);
+        }
+        let name = m.version, n = 1;
+        for (; ; ) {
+          if (!fs2.existsSync(path2.join(root, name)) && !(info && info.dir === name)) {
+            try {
+              renameRetry(stage, path2.join(root, name));
+              break;
+            } catch (e) {
+              if (!["ENOTEMPTY", "EEXIST"].includes(e.code)) throw e;
+            }
+          }
+          if (++n > 50) throw new UpdateError("no free folder name for " + m.version);
+          name = m.version + "_" + n;
+        }
+        const next = { base, dir: name, version: m.version, wrapper: info ? info.wrapper : "grid.cmd" };
+        writeAtomic(infoFile(), JSON.stringify(next, null, 2) + "\n");
+        try {
+          writeWrapper(next);
+        } catch (e) {
+          process.stderr.write(`warning: ${next.wrapper} could not be updated (${e.message}); it is repaired at the next start
+`);
+        }
+        return name;
+      } catch (e) {
+        try {
+          fs2.rmSync(stage, { recursive: true, force: true });
+        } catch {
+        }
+        throw e;
+      } finally {
+        dl.done();
+      }
+    }
+    var alive = (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (e) {
+        return e.code === "EPERM";
+      }
+    };
+    function inUse(dir) {
+      try {
+        return fs2.readdirSync(dir).some((n) => /^\.run-\d+$/.test(n) && alive(parseInt(n.slice(5), 10)));
+      } catch {
+        return false;
+      }
+    }
+    function markRunning() {
+      try {
+        const f = path2.join(path2.dirname(__filename), `.run-${process.pid}`);
+        fs2.writeFileSync(f, "");
+        process.on("exit", () => {
+          try {
+            fs2.unlinkSync(f);
+          } catch {
+          }
+        });
+      } catch {
+      }
+    }
+    function cleanOld(info) {
+      const root = nodeDir(), me = path2.basename(path2.dirname(__filename));
+      let ents;
+      try {
+        ents = fs2.readdirSync(root, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of ents) {
+        if (!e.isDirectory() || e.name === info.dir || e.name === me) continue;
+        const p = path2.join(root, e.name);
+        try {
+          if (/^\.old-/.test(e.name)) {
+            fs2.rmSync(p, { recursive: true, force: true });
+            continue;
+          }
+          if (/^\.tmp-/.test(e.name)) {
+            if (Date.now() - fs2.statSync(p).mtimeMs > 36e5) fs2.rmSync(p, { recursive: true, force: true });
+            continue;
+          }
+          if (!DIR_RE.test(e.name) || inUse(p)) continue;
+          const trash = path2.join(root, ".old-" + e.name + "-" + process.pid);
+          fs2.renameSync(p, trash);
+          try {
+            fs2.rmSync(trash, { recursive: true, force: true });
+          } catch {
+          }
+        } catch {
+        }
+      }
+    }
+    function installed(info, file = __filename) {
+      if (!info) return false;
+      try {
+        const a = fs2.realpathSync(file), b = fs2.realpathSync(path2.join(nodeDir(), info.dir, BUNDLE));
+        return WIN2 ? a.toLowerCase() === b.toLowerCase() : a === b;
+      } catch {
+        return false;
+      }
+    }
+    async function updateCmd(args2, version) {
+      const check = args2.includes("--check"), force = args2.includes("--force");
+      const info = readInfo(), base = distBase(info);
+      if (!base) throw new Error(`updates are not set up (no usable dist address: ${infoFile()} is missing or has no https address; install with ${INSTALLER}, or set GRID_DIST_URL)`);
+      const creds = loadCreds();
+      if (!creds) throw new Error(ERR_NO_CREDS);
+      const m = await fetchManifest(base, creds, 2e4).catch((e) => {
+        throw new Error(explain(e));
+      });
+      console.log(`installed: ${version}
+latest:    ${m.version}`);
+      const isNewer = newer(m.version, version);
+      if (!isNewer && (check || !force)) {
+        console.log("Already up to date.");
+        return;
+      }
+      if (check) {
+        console.log("A newer version is available. Run: grid update");
+        return;
+      }
+      if (!installed(info)) throw new Error(`this grid is not running from ${path2.join(nodeDir(), info ? info.dir : "")}, so it will not be replaced (install with the installer, or set it up there)`);
+      console.log(`downloading ${m.files.length} files (${(m.total / 1048576).toFixed(1)} MB)...`);
+      await install(m, base, creds, info).catch((e) => {
+        throw new Error(explain(e));
+      });
+      console.log(`Updated to ${m.version}. Restart grid to use it.`);
+    }
+    function askInstall(input, output) {
+      return new Promise((resolve) => {
+        const rl = readline.createInterface({ input, output });
+        let answered = false;
+        rl.on("SIGINT", () => {
+          rl.close();
+          process.exit(130);
+        });
+        rl.on("close", () => {
+          if (!answered) resolve(null);
+        });
+        rl.question("Install it now? [Y/n] ", (a) => {
+          answered = true;
+          rl.close();
+          resolve(/^(|y|yes|e|evet)$/i.test(a.trim()));
+        });
+      });
+    }
+    function restart(bundle) {
+      return new Promise((resolve) => {
+        const child = spawn2(process.execPath, [...process.execArgv, bundle, ...process.argv.slice(2)], { stdio: "inherit", env: { ...process.env, GRID_UPDATED: "1" } });
+        child.on("error", (e) => {
+          process.stderr.write(`could not start the new version: ${e.message}
+`);
+          resolve(false);
+        });
+        child.on("spawn", () => {
+          process.on("SIGINT", () => {
+          });
+          for (const s of ["SIGTERM", "SIGHUP"]) process.on(s, () => {
+            try {
+              child.kill(s);
+            } catch {
+            }
+          });
+        });
+        child.on("exit", (code, sig) => process.exit(code === null ? sig === "SIGINT" ? 130 : sig === "SIGTERM" ? 143 : 1 : code));
+      });
+    }
+    async function maybeUpdateOnServe(version, opts = {}) {
+      try {
+        if (process.env.GRID_UPDATED || process.env.GRID_NO_UPDATE) return false;
+        const info = readInfo();
+        if (!installed(info)) return false;
+        cleanOld(info);
+        markRunning();
+        try {
+          writeWrapper(info);
+        } catch {
+        }
+        const base = distBase(info), creds = base && loadCreds();
+        if (!base || !creds) return false;
+        let m;
+        try {
+          m = await fetchManifest(base, creds, 3e3);
+        } catch (e) {
+          process.stderr.write(e.auth ? `update check: ${e.message}; refresh them with: node ${INSTALLER} --reset-credentials
+` : `update check skipped: ${explain(e)}
+`);
+          return false;
+        }
+        if (!newer(m.version, version)) return false;
+        console.log(`A new version is available: ${m.version} (installed: ${version})`);
+        const stdin = opts.stdin || process.stdin;
+        if (!stdin.isTTY) {
+          console.log("Run `grid update` to install it.");
+          return false;
+        }
+        if (!await askInstall(stdin, opts.stdout || process.stdout)) return false;
+        let dir;
+        try {
+          dir = await install(m, base, creds, info);
+        } catch (e) {
+          process.stderr.write(`update failed, continuing with the current version: ${explain(e)}
+`);
+          return false;
+        }
+        console.log(`Updated to ${m.version}, restarting...`);
+        return await restart(path2.join(nodeDir(), dir, BUNDLE));
+      } catch (e) {
+        try {
+          process.stderr.write(`update check skipped: ${e && e.message || e}
+`);
+        } catch {
+        }
+        return false;
+      }
+    }
+    module2.exports = { newer, validateManifest, rawUrl, distBase, readInfo, installed, loadCreds, fetchManifest, install, cleanOld, askInstall, updateCmd, maybeUpdateOnServe, UpdateError, ERR_NO_CREDS, ERR_AUTH };
+  }
+});
+
 // src/ui-embed.cjs
 var require_ui_embed = __commonJS({
   "src/ui-embed.cjs"(exports2, module2) {
@@ -16893,12 +17399,20 @@ var { createStats } = require_stats();
 var { createDb } = require_db();
 var { McpServer, serveStdio, handleHttp: mcpHttp, parseFlags } = require_mcp();
 var WIN = process.platform === "win32";
-var VERSION = "0.0.2-nodepoc";
+var VERSION = require_version();
+var update = require_update();
 var [cmd = "serve", ...args] = process.argv.slice(2);
 var PORT = parseFlags(args, Number(process.env.GRID_PORT || 18900)).port;
 if (cmd === "mcp") mcpStdio();
-else if (cmd !== "serve") cli();
-else serve();
+else if (cmd === "serve") update.maybeUpdateOnServe(VERSION).then((restarted) => {
+  if (!restarted) serve();
+}, () => serve());
+else if (cmd === "update") update.updateCmd(args, VERSION).catch((e) => {
+  console.error("update: " + e.message);
+  process.exit(1);
+});
+else if (cmd === "version" || cmd === "--version" || cmd === "-v") console.log(VERSION);
+else cli();
 function mcpStdio() {
   const f = parseFlags(args, PORT);
   serveStdio(new McpServer({ port: f.port, version: VERSION, defaultWait: f.wait > 0 ? f.wait * 1e3 : void 0 })).then(() => process.exit(0));
@@ -17307,5 +17821,5 @@ function cli() {
     r.end();
     return;
   }
-  console.log("usage: grid [serve [--no-browser] [--config=file]] | status | logs <svc> [n] | start|stop|restart <svc|all>");
+  console.log("usage: grid [serve [--no-browser] [--config=file]] | status | logs <svc> [n] | start|stop|restart <svc|all> | update [--check] [--force] | version");
 }

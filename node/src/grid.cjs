@@ -1,4 +1,4 @@
-// The Grid - Node PoC v2: supervisor + the existing React UI + CLI, single file.
+// The Grid (Node version): supervisor + the existing React UI + CLI, single file.
 const fs = require('fs'), path = require('path'), http = require('http'), net = require('net')
 const { spawn, execFile } = require('child_process')
 const { load: loadConfig, environ, checkRuntime } = require('./config.cjs')
@@ -11,10 +11,15 @@ const { createStats } = require('./stats.cjs')
 const { createDb } = require('./db.cjs')
 const { McpServer, serveStdio, handleHttp: mcpHttp, parseFlags } = require('./mcp.cjs')
 const WIN = process.platform === 'win32'
-const VERSION = '0.0.2-nodepoc'
+const VERSION = require('./version.cjs')
+const update = require('./update.cjs')
 const [cmd = 'serve', ...args] = process.argv.slice(2)
 const PORT = parseFlags(args, Number(process.env.GRID_PORT || 18900)).port // -p wins over $GRID_PORT
-if (cmd === 'mcp') mcpStdio(); else if (cmd !== 'serve') cli(); else serve()
+if (cmd === 'mcp') mcpStdio()
+else if (cmd === 'serve') update.maybeUpdateOnServe(VERSION).then(restarted => { if (!restarted) serve() }, () => serve()) // the check never blocks serve for long and never throws
+else if (cmd === 'update') update.updateCmd(args, VERSION).catch(e => { console.error('update: ' + e.message); process.exit(1) })
+else if (cmd === 'version' || cmd === '--version' || cmd === '-v') console.log(VERSION)
+else cli()
 
 // `mcp`: the MCP server on stdin / stdout for an AI agent; it talks to the running Grid on -p / $GRID_PORT
 function mcpStdio() {
@@ -255,5 +260,5 @@ function cli() {
   if (cmd === 'status') return get('/api/state').then(b => JSON.parse(b).services.forEach(s => console.log(s.name.padEnd(16), s.status.padEnd(10), s.pid || '')))
   if (cmd === 'logs') return get(`/api/services/${args[0]}/logs?tail=${args[1] || 50}`).then(console.log)
   if (act) { const r = http.request({ host: '127.0.0.1', port: PORT, path: `/api/do/${args[0]}/${cmd}`, method: 'POST', headers: { 'x-grid': 'cli' } }, res => res.pipe(process.stdout)); r.end(); return }
-  console.log('usage: grid [serve [--no-browser] [--config=file]] | status | logs <svc> [n] | start|stop|restart <svc|all>')
+  console.log('usage: grid [serve [--no-browser] [--config=file]] | status | logs <svc> [n] | start|stop|restart <svc|all> | update [--check] [--force] | version')
 }
