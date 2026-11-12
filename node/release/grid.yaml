@@ -1,0 +1,6 @@
+# Example config. Services run through cmd.exe on Windows.
+name: Node PoC
+services:
+  hello:
+    group: demo
+    command: node -e "setInterval(()=>console.log(new Date().toISOString()+' hello'),1000)"
