@@ -3,7 +3,7 @@ import { saveSettings, setLogLines, type State } from './api'
 import type { Theme } from './theme'
 import { formatBytes } from './ui'
 
-const SHORTCUTS: [string, [string[], string][]][] = [
+export const SHORTCUTS: [string, [string[], string][]][] = [
   [
     'Services',
     [
@@ -12,7 +12,7 @@ const SHORTCUTS: [string, [string[], string][]][] = [
       [['R'], 'Restart'],
       [['C'], 'Clear log'],
       [['/'], 'Filter log'],
-      [['Esc'], 'Clear filter'],
+      [['Esc'], 'Close service / clear filter'],
       [['N'], 'New service'],
       [['E'], 'Edit service'],
     ],

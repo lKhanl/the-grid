@@ -292,10 +292,8 @@ export function StartupSection({
 /** Restart policy, encoding, stop timeout. */
 export function AdvancedSection({ spec, set }: { spec: ServiceSpec; set: Setter<ServiceSpec> }) {
   return (
-    <details className="form-section">
-      <summary>
-        <h3>Advanced</h3>
-      </summary>
+    <section className="form-section">
+      <h3>Advanced</h3>
       <div className="grid-3">
         <label className="field">
           <span>Restart policy</span>
@@ -328,6 +326,6 @@ export function AdvancedSection({ spec, set }: { spec: ServiceSpec; set: Setter<
         <span>Stop timeout</span>
         <input value={spec.stopTimeout} onChange={(e) => set('stopTimeout', e.target.value)} placeholder="10s" />
       </label>
-    </details>
+    </section>
   )
 }

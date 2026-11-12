@@ -27,7 +27,7 @@ const SIDE_DEFAULT = 330
 export default function App() {
   const store = useMemo(() => new LogStore(), [])
   const [state, setState] = useState<State | null>(null)
-  const [selected, setSelected] = useState<string | null>(() => localStorage.getItem('grid.selected'))
+  const [selected, setSelected] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const logLines = state?.logLines ?? 1000
   store.setMax(logLines) // cheap no-op unless the setting changed
@@ -65,7 +65,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [panel, setPanel] = useState<Panel>(() => {
     const p = localStorage.getItem('grid.panel')
-    return p === 'runtimes' || p === 'settings' || p === 'changes' || p === 'database' ? p : 'services'
+    return p === 'runtimes' || p === 'settings' || p === 'changes' || p === 'database' || p === 'services' ? (p as Panel) : 'services'
   })
   const [sideW, setSideW] = useState(() => {
     const n = Number(localStorage.getItem('grid.sideW'))
@@ -103,6 +103,7 @@ export default function App() {
   useEffect(() => {
     if (state && !hasDb && panel === 'database') setPanel('services')
   }, [state, hasDb, panel])
+  useEffect(() => localStorage.setItem('grid.panel', panel ?? 'off'), [panel])
   const filterRef = useRef<HTMLInputElement>(null)
   const selectedRef = useRef(selected)
   selectedRef.current = selected
@@ -110,10 +111,6 @@ export default function App() {
   const term = useTerminals(selectedCwd, setError)
   const { onServerList, setTermOpen } = term
 
-  useEffect(() => {
-    if (selected) localStorage.setItem('grid.selected', selected)
-  }, [selected])
-  useEffect(() => localStorage.setItem('grid.panel', panel), [panel])
   useEffect(() => localStorage.setItem('grid.neon', neon ? 'on' : 'off'), [neon])
   useEffect(() => applyTheme(theme), [theme])
 
@@ -124,7 +121,7 @@ export default function App() {
       if (h === 'new' || h.startsWith('new=')) setForm({ editing: null, group: h.slice(4) || undefined })
       else if (h.startsWith('new-dir=')) setForm({ editing: null, cwd: h.slice(8) })
       else if (h.startsWith('edit=')) setForm({ editing: h.slice(5) })
-      else if (h === 'runtimes' || h === 'services' || h === 'settings' || h === 'database') setPanel(h)
+      else if (h === 'runtimes' || h === 'services' || h === 'settings' || h === 'database') setPanel(h as Panel)
       else if (h === 'terminal') setTermOpen(true)
       else if (h === 'theme=basic' || h === 'theme=grid') setTheme(h.slice(6) as Theme)
       else if (h.startsWith('select=')) setSelected(h.slice(7))
@@ -225,6 +222,10 @@ export default function App() {
         ;(e.target as HTMLInputElement).blur()
         return
       }
+      if (e.key === 'Escape') {
+        setSelected(null)
+        return
+      }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return
       const idx = ordered.findIndex((s) => s.name === selected)
       if (e.key === 'ArrowDown' || e.key === 'j') {
@@ -289,7 +290,7 @@ export default function App() {
         {panel === 'services' && (
           <>
             <Btn icon={<PlayIcon />} label="Start all" title="Start all" kind="text green" onClick={() => run('all', 'start')} />
-            <Btn icon={<StopIcon />} label="Stop all" title="End of line: stop every program" kind="text red" onClick={() => run('all', 'stop')} />
+            <Btn icon={<StopIcon />} label="Stop all" title="End of line: stop every program" kind="text red" disabled={runningCount === 0} onClick={() => run('all', 'stop')} />
             <Btn
               icon={<ReloadIcon />}
               label="Reload config"
@@ -318,7 +319,7 @@ export default function App() {
           liveTerms={term.terms.filter((t) => !t.exited).length}
           onToggleTerm={term.toggle}
         />
-        <aside className="sidebar" style={{ width: sideW }}>
+        <aside className="sidebar" style={{ width: sideW, display: panel ? 'flex' : 'none' }}>
           {panel === 'services' ? (
             <ServiceList
               state={state}
@@ -362,7 +363,7 @@ export default function App() {
           }}
           title="Drag to resize, double-click to reset"
         />
-        <section className="detail">
+        <section className={`detail ${term.termOpen ? 'term-open' : ''}`}>
           {panel === 'changes' && !(term.termOpen && term.termMax) && <DiffPane git={git} />}
           {panel === 'database' && !(term.termOpen && term.termMax) && <DbWorkbench dbs={dbs} />}
           <div
@@ -442,7 +443,7 @@ export default function App() {
           }}
         />
       )}
-      {dbs.form && <DbForm editing={dbs.form.editing} kinds={dbKinds} onClose={dbs.closeForm} onSaved={dbs.saved} />}
+      {dbs.form && <DbForm editing={dbs.form.editing} kinds={dbKinds} group={dbs.form.group} onClose={dbs.closeForm} onSaved={dbs.saved} />}
       {rtForm && state && <RuntimeForm state={state} editing={rtForm.editing} onClose={() => setRtForm(null)} onDone={() => setRtForm(null)} />}
     </div>
   )

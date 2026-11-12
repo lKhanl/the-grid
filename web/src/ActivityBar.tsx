@@ -1,6 +1,6 @@
 import { ChangesIcon, DatabaseIcon, RuntimesIcon, ServicesIcon, SettingsIcon, TerminalIcon } from './icons'
 
-export type Panel = 'services' | 'changes' | 'database' | 'runtimes' | 'settings'
+export type Panel = 'services' | 'changes' | 'database' | 'runtimes' | 'settings' | null
 
 interface Props {
   panel: Panel
@@ -19,14 +19,15 @@ interface Props {
   onToggleTerm: () => void
 }
 
-/** The icon bar on the far left. */
+/** The icon bar on the far left. Tapping the active panel closes the sidebar. */
 export function ActivityBar({ panel, setPanel, runningCount, gitTotal, hasDb, dbInTx, runtimesBroken, termOpen, liveTerms, onToggleTerm }: Props) {
+  const toggle = (p: Panel) => () => setPanel(panel === p ? null : p)
   return (
     <nav className="activitybar">
       <button
         className={`activity ${panel === 'services' ? 'on' : ''}`}
         aria-label="Services"
-        onClick={() => setPanel('services')}
+        onClick={toggle('services')}
       >
         <ServicesIcon size={22} />
         <span className="activity-tip">Services</span>
@@ -35,7 +36,7 @@ export function ActivityBar({ panel, setPanel, runningCount, gitTotal, hasDb, db
       <button
         className={`activity ${panel === 'changes' ? 'on' : ''}`}
         aria-label="Changes"
-        onClick={() => setPanel('changes')}
+        onClick={toggle('changes')}
       >
         <ChangesIcon size={22} />
         <span className="activity-tip">Changes (git diff)</span>
@@ -45,7 +46,7 @@ export function ActivityBar({ panel, setPanel, runningCount, gitTotal, hasDb, db
         <button
           className={`activity ${panel === 'database' ? 'on' : ''}`}
           aria-label="Database"
-          onClick={() => setPanel('database')}
+          onClick={toggle('database')}
         >
           <DatabaseIcon size={22} />
           <span className="activity-tip">Database</span>
@@ -55,7 +56,7 @@ export function ActivityBar({ panel, setPanel, runningCount, gitTotal, hasDb, db
       <button
         className={`activity ${panel === 'runtimes' ? 'on' : ''}`}
         aria-label="Runtimes"
-        onClick={() => setPanel('runtimes')}
+        onClick={toggle('runtimes')}
       >
         <RuntimesIcon size={22} />
         <span className="activity-tip">Runtimes</span>
@@ -75,7 +76,7 @@ export function ActivityBar({ panel, setPanel, runningCount, gitTotal, hasDb, db
       <button
         className={`activity ${panel === 'settings' ? 'on' : ''}`}
         aria-label="Settings"
-        onClick={() => setPanel('settings')}
+        onClick={toggle('settings')}
       >
         <SettingsIcon size={21} />
         <span className="activity-tip">Settings</span>

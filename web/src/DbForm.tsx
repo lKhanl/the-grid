@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { dbSave, dbTest, type DbConn, type DbKind, type DbMode, type DbView, type McpAccess, type SslMode } from './dbApi'
+import { useEffect, useState } from 'react'
+import { dbSave, dbTest, dbTnsAliases, type DbConn, type DbKind, type DbMode, type DbView, type McpAccess, type SslMode } from './dbApi'
 import { message } from './dbState'
 import { CloseIcon } from './icons'
 
@@ -8,29 +8,57 @@ import { CloseIcon } from './icons'
 const blank = (kind: DbKind): DbConn =>
   kind === 'postgres'
     ? { name: '', kind, host: '', port: 5432, database: '', sslMode: 'prefer', user: '', password: '', autoCommit: false, mcp: 'readonly' }
-    : { name: '', kind, mode: 'service', host: '', port: 1521, service: '', user: '', password: '', autoCommit: false, mcp: 'readonly' }
+    : { name: '', kind, mode: 'service', host: '', port: 1521, service: '', user: '', password: '', autoCommit: false, mcp: 'readonly', tnsAdmin: 'Y:\\central_tnsnames\\tnsnames.ora' }
 const KIND_LABEL: Record<DbKind, string> = { oracle: 'Oracle', postgres: 'PostgreSQL' }
 const DEFAULT_PORT: Record<DbKind, number> = { oracle: 1521, postgres: 5432 }
 
 export function DbForm({
   editing,
   kinds,
+  group,
   onClose,
   onSaved,
 }: {
   editing: DbView | null
   /** the drivers in this build; empty = an older server, assume both */
   kinds: DbKind[]
+  /** a group from the sidebar "New" button, pre-filled for a new connection */
+  group?: string
   onClose: () => void
   onSaved: (v: DbView, old: string | null) => void
 }) {
   const offered: DbKind[] = kinds.length ? kinds : ['oracle', 'postgres']
-  const [c, setC] = useState<DbConn>(() => (editing ? { ...editing, password: '' } : blank(offered[0])))
+  const [c, setC] = useState<DbConn>(() => (editing ? { ...editing, password: '' } : { ...blank(offered[0]), group: group ?? '' }))
   const missing = !offered.includes(c.kind) // a saved connection whose driver this build lacks
   const [error, setError] = useState<string | null>(null)
   const [test, setTest] = useState<{ ok: boolean; text: string } | 'running' | null>(null)
   const [saving, setSaving] = useState(false)
+  const [tnsAliases, setTnsAliases] = useState<string[]>([])
+  const [tnsErr, setTnsErr] = useState<string | null>(null)
   const set = <K extends keyof DbConn>(k: K, v: DbConn[K]) => setC((cur) => ({ ...cur, [k]: v }))
+  useEffect(() => {
+    if (c.kind !== 'oracle' || c.mode !== 'tns' || !c.tnsAdmin) {
+      setTnsAliases([])
+      setTnsErr(null)
+      return
+    }
+    let live = true
+    dbTnsAliases(c.tnsAdmin).then(
+      (a) => {
+        if (!live) return
+        setTnsAliases(a)
+        setTnsErr(null)
+      },
+      (e) => {
+        if (!live) return
+        setTnsAliases([])
+        setTnsErr(message(e))
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [c.kind, c.mode, c.tnsAdmin])
   // another kind: its own defaults, and the port follows unless it was changed by hand
   const setKind = (kind: DbKind) =>
     setC((cur) => ({
@@ -83,6 +111,10 @@ export function DbForm({
             <span>Name</span>
             <input value={c.name} onChange={(e) => set('name', e.target.value)} placeholder="orders-dev" autoFocus spellCheck={false} />
           </label>
+          <label className="field">
+            <span>Group</span>
+            <input value={c.group ?? ''} onChange={(e) => set('group', e.target.value)} placeholder="production" spellCheck={false} />
+          </label>
           {(offered.length > 1 || missing) && (
             <label className="field">
               <span>Database</span>
@@ -102,7 +134,7 @@ export function DbForm({
               <select value={c.mode} onChange={(e) => set('mode', e.target.value as DbMode)}>
                 <option value="service">Host, port and service name</option>
                 <option value="sid">Host, port and SID</option>
-                <option value="tns">TNS descriptor or alias</option>
+                <option value="tns">TNS alias</option>
               </select>
             </label>
           )}
@@ -152,19 +184,19 @@ export function DbForm({
           {!pg && c.mode === 'tns' && (
             <>
               <label className="field">
-                <span>Descriptor or alias</span>
-                <textarea
-                  className="mono"
-                  rows={3}
-                  value={c.tns ?? ''}
-                  onChange={(e) => set('tns', e.target.value)}
-                  placeholder={'(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=…)(PORT=1521))(CONNECT_DATA=(SERVICE_NAME=…)))\nor an alias from tnsnames.ora'}
-                  spellCheck={false}
-                />
+                <span>Folder with tnsnames.ora (default: the TNS_ADMIN variable)</span>
+                <input className="mono" value={c.tnsAdmin ?? ''} onChange={(e) => set('tnsAdmin', e.target.value)} placeholder="Y:\central_tnsnames\tnsnames.ora" spellCheck={false} />
               </label>
               <label className="field">
-                <span>Folder with tnsnames.ora (for an alias; default: the TNS_ADMIN variable)</span>
-                <input className="mono" value={c.tnsAdmin ?? ''} onChange={(e) => set('tnsAdmin', e.target.value)} placeholder="C:/oracle/network/admin" spellCheck={false} />
+                <span>Alias</span>
+                <select value={c.tns ?? ''} onChange={(e) => set('tns', e.target.value)} disabled={!tnsAliases.length}>
+                  {!tnsAliases.length && <option value="">{tnsErr ?? 'No aliases found'}</option>}
+                  {tnsAliases.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
               </label>
             </>
           )}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { dbDescribe, dbSchemas, dbTables, quoteName, type DbView, type TableInfo, type TableRef } from './dbApi'
 import { message, where, type DbState } from './dbState'
 import { Btn } from './ui'
@@ -22,6 +22,16 @@ const aiAccess = {
 }
 
 export function DbSidebar({ dbs }: { dbs: DbState }) {
+  const groups = useMemo(() => {
+    const m = new Map<string, DbView[]>()
+    for (const c of dbs.conns) {
+      const g = c.group ?? ''
+      if (!m.has(g)) m.set(g, [])
+      m.get(g)!.push(c)
+    }
+    return [...m.entries()]
+  }, [dbs.conns])
+
   return (
     <>
       <div className="sidebar-head divided">
@@ -43,36 +53,183 @@ export function DbSidebar({ dbs }: { dbs: DbState }) {
           </button>
         </div>
       )}
-      {dbs.conns.map((c) => (
-        <div key={c.name} className={`row db-conn ${c.name === dbs.current?.name ? 'selected' : ''}`} onClick={() => dbs.select(c.name)} title={`${c.user}@${where(c)}\n${aiAccess[c.mcp] ?? aiAccess.readonly}`}>
-          <span className={`db-dot ${c.connected ? 'on' : ''} ${c.inTx ? 'tx' : ''}`} title={c.inTx ? 'Uncommitted changes' : c.connected ? 'Connected' : 'Not connected'} />
-          <span className="name">{c.name}</span>
-          <span className="meta">{c.mcp === 'off' ? '' : c.mcp === 'readwrite' ? 'AI: write' : 'AI: read'}</span>
-          <span className="row-actions">
-            <button
-              className="icon-btn"
-              title="Edit"
-              onClick={(e) => {
-                e.stopPropagation()
-                dbs.openForm(c)
+      <ConnGroups dbs={dbs} groups={groups} />
+      {dbs.current && <SchemaTree key={dbs.current.name} dbs={dbs} conn={dbs.current} />}
+    </>
+  )
+}
+
+function ConnGroups({ dbs, groups }: { dbs: DbState; groups: [string, DbView[]][] }) {
+  // drag & drop reordering inside a group, and moving whole groups
+  const [drag, setDrag] = useState<{ name: string; group: string } | null>(null)
+  const [dropAt, setDropAt] = useState<{ name: string; after: boolean } | null>(null)
+  const [dragGroup, setDragGroup] = useState<string | null>(null)
+  const [groupDropAt, setGroupDropAt] = useState<{ group: string; after: boolean } | null>(null)
+
+  const endDrag = () => {
+    setDrag(null)
+    setDropAt(null)
+    setDragGroup(null)
+    setGroupDropAt(null)
+  }
+
+  /** All connection names in the displayed group order (after a drag). */
+  const names = () => groups.flatMap(([, list]) => list.map((c) => c.name))
+  /** groups map name -> group, for the reorder call. */
+  const groupMap = () => {
+    const m: Record<string, string> = {}
+    for (const [g, list] of groups) for (const c of list) m[c.name] = g
+    return m
+  }
+
+  function moveService(name: string, target: string, after: boolean) {
+    if (name === target) return
+    const all = names()
+    const group = dbs.conns.find((c) => c.name === name)?.group ?? ''
+    const slots = dbs.conns.flatMap((c, i) => ((c.group ?? '') === group ? [i] : []))
+    const members = slots.map((i) => all[i]).filter((n) => n !== name)
+    const at = members.indexOf(target) + (after ? 1 : 0)
+    members.splice(at, 0, name)
+    const next = [...all]
+    slots.forEach((i, k) => (next[i] = members[k]))
+    dbs.reorder(next, groupMap())
+  }
+
+  function moveGroup(name: string, target: string, after: boolean) {
+    if (name === target) return
+    const order = groups.map(([g]) => g).filter((g) => g !== name)
+    order.splice(order.indexOf(target) + (after ? 1 : 0), 0, name)
+    dbs.reorder(order.flatMap((g) => groups.find(([x]) => x === g)![1].map((c) => c.name)), groupMap())
+  }
+
+  /** Move a connection into another group (drops at the end of that group). */
+  function moveToGroup(name: string, targetGroup: string) {
+    if ((dbs.conns.find((c) => c.name === name)?.group ?? '') === targetGroup) return
+    const all = names()
+    const next = all.filter((n) => n !== name)
+    // build the groups map with the new group for the moved connection
+    const gm = groupMap()
+    gm[name] = targetGroup
+    dbs.reorder(next, gm)
+  }
+
+  return (
+    <>
+      {groups.map(([group, list]) => (
+        <div
+          key={group}
+          className={`group ${dragGroup === group ? 'dragging' : ''} ${
+            groupDropAt?.group === group && dragGroup !== group ? (groupDropAt.after ? 'drop-after' : 'drop-before') : ''
+          }`}
+          onDragOver={(e) => {
+            if (dragGroup === null) return // a connection is being dragged: rows handle it
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            const r = e.currentTarget.getBoundingClientRect()
+            const after = e.clientY > r.top + r.height / 2
+            if (groupDropAt?.group !== group || groupDropAt.after !== after) setGroupDropAt({ group, after })
+          }}
+          onDrop={(e) => {
+            if (dragGroup === null) return
+            e.preventDefault()
+            if (groupDropAt) moveGroup(dragGroup, groupDropAt.group, groupDropAt.after)
+            endDrag()
+          }}
+        >
+          {group && (
+            <div
+              className="group-head"
+              draggable
+              title="Click to collapse or expand, drag to reorder"
+              onClick={() => dbs.toggleGroup(group)}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.setData('text/plain', 'group:' + group)
+                setDragGroup(group)
               }}
+              onDragEnd={endDrag}
             >
-              <EditIcon size={14} />
-            </button>
-            <button
-              className="icon-btn"
-              title="Delete"
-              onClick={(e) => {
-                e.stopPropagation()
-                dbs.remove(c.name)
-              }}
-            >
-              <TrashIcon size={14} />
-            </button>
-          </span>
+              <span className={`group-chevron ${dbs.collapsed.has(group) ? '' : 'open'}`}>
+                <ChevronIcon size={13} />
+              </span>
+              <span className="group-name">{group}</span>
+              {dbs.collapsed.has(group) && (
+                <span className="group-count">
+                  {list.some((c) => c.connected) && <span className="dot dot-running" />}
+                  {list.filter((c) => c.connected).length}/{list.length}
+                </span>
+              )}
+              <span className="row-actions">
+                <Btn icon={<PlusIcon size={14} />} title={`New connection in ${group}`} onClick={() => dbs.openForm(null, group)} />
+              </span>
+            </div>
+          )}
+          {!(group && dbs.collapsed.has(group)) &&
+            list.map((c) => (
+              <div
+                key={c.name}
+                className={`row db-conn ${c.name === dbs.current?.name ? 'selected' : ''} ${group ? 'indent' : ''} ${
+                  drag?.name === c.name ? 'dragging' : ''
+                } ${dropAt?.name === c.name && drag?.name !== c.name ? (dropAt.after ? 'drop-after' : 'drop-before') : ''}`}
+                onClick={() => dbs.select(c.name)}
+                title={`${c.user}@${where(c)}\n${aiAccess[c.mcp] ?? aiAccess.readonly}`}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.setData('text/plain', c.name)
+                  setDrag({ name: c.name, group })
+                }}
+                onDragOver={(e) => {
+                  if (!drag) return // a group is being dragged: the group handles it
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  const r = e.currentTarget.getBoundingClientRect()
+                  const after = e.clientY > r.top + r.height / 2
+                  if (dropAt?.name !== c.name || dropAt.after !== after) setDropAt({ name: c.name, after })
+                }}
+                onDrop={(e) => {
+                  if (!drag) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (drag.group !== group) {
+                    // dropped onto a row in another group: move the connection there
+                    moveToGroup(drag.name, group)
+                  } else if (dropAt) {
+                    moveService(drag.name, dropAt.name, dropAt.after)
+                  }
+                  endDrag()
+                }}
+                onDragEnd={endDrag}
+              >
+                <span className={`db-dot ${c.connected ? 'on' : ''} ${c.inTx ? 'tx' : ''}`} title={c.inTx ? 'Uncommitted changes' : c.connected ? 'Connected' : 'Not connected'} />
+                <span className="name">{c.name}</span>
+                <span className="meta">{c.mcp === 'off' ? '' : c.mcp === 'readwrite' ? 'AI: write' : 'AI: read'}</span>
+                <span className="row-actions">
+                  <button
+                    className="icon-btn"
+                    title="Edit"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      dbs.openForm(c)
+                    }}
+                  >
+                    <EditIcon size={14} />
+                  </button>
+                  <button
+                    className="icon-btn"
+                    title="Delete"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      dbs.remove(c.name)
+                    }}
+                  >
+                    <TrashIcon size={14} />
+                  </button>
+                </span>
+              </div>
+            ))}
         </div>
       ))}
-      {dbs.current && <SchemaTree key={dbs.current.name} dbs={dbs} conn={dbs.current} />}
     </>
   )
 }

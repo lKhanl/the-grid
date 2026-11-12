@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { deleteRuntime, getRuntime, probeRuntime, saveRuntime, type ProbeResult, type RuntimeSpec, type RuntimeType, type State } from './api'
-import { CheckIcon, CloseIcon, PlusIcon, RuntimeTypeIcon, TrashIcon, WarnIcon } from './icons'
+import { CheckIcon, CloseIcon, RuntimeTypeIcon, TrashIcon, WarnIcon } from './icons'
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
@@ -46,7 +46,7 @@ interface Props {
 }
 
 export function RuntimeForm({ state, editing, onClose, onDone }: Props) {
-  const [spec, setSpec] = useState<RuntimeSpec | null>(editing ? null : { name: '', type: 'java', home: '', bin: '', env: [] })
+  const [spec, setSpec] = useState<RuntimeSpec | null>(editing ? null : { name: '', type: 'java', home: '', bin: '', env: null })
   const [typeTouched, setTypeTouched] = useState(!!editing)
   const [probe, setProbe] = useState<ProbeResult | null>(null)
   const [probing, setProbing] = useState(false)
@@ -60,7 +60,7 @@ export function RuntimeForm({ state, editing, onClose, onDone }: Props) {
 
   useEffect(() => {
     if (!editing) return
-    getRuntime(editing).then((s) => setSpec({ ...s, env: s.env ?? [] }), (e) => setError(e.message))
+    getRuntime(editing).then((s) => setSpec({ ...s, env: null }), (e) => setError(e.message))
   }, [editing])
 
   useEffect(() => {
@@ -108,7 +108,7 @@ export function RuntimeForm({ state, editing, onClose, onDone }: Props) {
     setBusy(true)
     setError(null)
     try {
-      const out = { ...spec, name: spec.name.trim(), env: (spec.env ?? []).filter((e) => e.key.trim()) }
+      const out = { ...spec, name: spec.name.trim(), env: null }
       await saveRuntime(out, editing)
       onDone(out.name, out.type)
     } catch (e) {
@@ -132,9 +132,6 @@ export function RuntimeForm({ state, editing, onClose, onDone }: Props) {
       setBusy(false)
     }
   }
-
-  const env = spec?.env ?? []
-  const setEnv = (i: number, k: 'key' | 'value', v: string) => set('env', env.map((e, j) => (j === i ? { ...e, [k]: v } : e)))
 
   return (
     <div
@@ -196,35 +193,6 @@ export function RuntimeForm({ state, editing, onClose, onDone }: Props) {
                 {probe && <ProbeLine probe={probe} type={spec.type} />}
               </label>
             </section>
-
-            <details className="form-section" open={!!spec.bin || env.length > 0}>
-              <summary>
-                <h3>Advanced</h3>
-              </summary>
-              <label className="field">
-                <span>Bin folder</span>
-                <input className="mono" value={spec.bin} onChange={(e) => set('bin', e.target.value)} placeholder="bin (relative to home; leave empty for the default)" />
-              </label>
-              <div className="field">
-                <span>Extra environment</span>
-                <div className="env-rows">
-                  {env.map((e, i) => (
-                    <div className="env-row" key={i}>
-                      <input className="mono" value={e.key} placeholder={spec.type === 'script' ? 'MAVEN_OPTS' : 'NAME'} onChange={(ev) => setEnv(i, 'key', ev.target.value)} />
-                      <span className="muted">=</span>
-                      <input className="mono" value={e.value} placeholder={spec.type === 'script' ? '-Xmx1g' : 'value'} onChange={(ev) => setEnv(i, 'value', ev.target.value)} />
-                      <button className="btn" title="Remove" onClick={() => set('env', env.filter((_, j) => j !== i))}>
-                        <CloseIcon size={14} />
-                      </button>
-                    </div>
-                  ))}
-                  <button className="btn text" onClick={() => set('env', [...env, { key: '', value: '' }])}>
-                    <PlusIcon size={14} />
-                    <span>Add variable</span>
-                  </button>
-                </div>
-              </div>
-            </details>
 
             {editing && (
               <div className="muted small used-by">

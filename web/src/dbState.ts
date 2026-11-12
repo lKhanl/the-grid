@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { dbCancel, dbCommit, dbDelete, dbDisconnect, dbList, dbReloadFile, dbRollback, dbRun, type DbConn, type DbResult, type DbView } from './dbApi'
+import { dbCancel, dbCommit, dbDelete, dbDisconnect, dbList, dbReorder, dbReloadFile, dbRollback, dbRun, type DbConn, type DbResult, type DbView } from './dbApi'
 import { splitSql } from './sqlSplit'
 
 // State shared by the Database sidebar and the workbench.
@@ -30,8 +30,8 @@ export interface DbState {
   loading: boolean
   error: string | null
   setError: (e: string | null) => void
-  form: { editing: DbView | null } | null
-  openForm: (editing: DbView | null) => void
+  form: { editing: DbView | null; group?: string } | null
+  openForm: (editing: DbView | null, group?: string) => void
   closeForm: () => void
   saved: (v: DbView, old: string | null) => void
   remove: (name: string) => void
@@ -52,6 +52,11 @@ export interface DbState {
   disconnect: () => void
   maxRows: number
   setMaxRows: (n: number) => void
+  /** collapsed db groups (by name); '' = the unnamed group */
+  collapsed: Set<string>
+  toggleGroup: (group: string) => void
+  /** persist a new order for all connections, and a new group per name */
+  reorder: (names: string[], groups: Record<string, string>) => void
 }
 
 export const ROW_OPTIONS = [10, 50, 100, 500, 1000]
@@ -72,7 +77,7 @@ export function useDatabase(active: boolean): DbState {
   const [selected, setSelected] = useState<string | null>(() => localStorage.getItem('grid.db.selected'))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [form, setForm] = useState<{ editing: DbView | null } | null>(null)
+  const [form, setForm] = useState<{ editing: DbView | null; group?: string } | null>(null)
   const [sqls, setSqls] = useState<Record<string, string>>(() => loadJSON('grid.db.sql', {}))
   const [runs, setRuns] = useState<Record<string, RunState>>({})
   const [sqlRev, setSqlRev] = useState(0)
@@ -80,6 +85,7 @@ export function useDatabase(active: boolean): DbState {
     const n = Number(localStorage.getItem('grid.db.maxrows'))
     return ROW_OPTIONS.includes(n) ? n : DEFAULT_ROWS // an older, larger saved choice falls back
   })
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set<string>(loadJSON('grid.db.collapsed', [])))
 
   const current = conns.find((c) => c.name === selected) ?? null
   const patch = useCallback((v: DbView) => setConns((list) => list.map((c) => (c.name === v.name ? v : c))), [])
@@ -180,7 +186,7 @@ export function useDatabase(active: boolean): DbState {
     error,
     setError,
     form,
-    openForm: (editing) => setForm({ editing }),
+    openForm: (editing, group) => setForm({ editing, group }),
     closeForm: () => setForm(null),
     saved: (v, old) => {
       setForm(null)
@@ -234,6 +240,32 @@ export function useDatabase(active: boolean): DbState {
     setMaxRows: (n) => {
       localStorage.setItem('grid.db.maxrows', String(n))
       setMaxRowsState(n)
+    },
+    collapsed,
+    toggleGroup: (group) =>
+      setCollapsed((cur) => {
+        const next = new Set(cur)
+        if (next.has(group)) next.delete(group)
+        else next.add(group)
+        localStorage.setItem('grid.db.collapsed', JSON.stringify([...next]))
+        return next
+      }),
+    reorder: (names, groups) => {
+      // optimistic: reorder in memory, then persist
+      setConns((list) => {
+        const byName = new Map(list.map((c) => [c.name, c]))
+        const out: DbView[] = []
+        const seen = new Set<string>()
+        for (const n of names) {
+          const c = byName.get(n)
+          if (!c) continue
+          seen.add(n)
+          out.push(groups[n] !== undefined ? { ...c, group: groups[n] } : c)
+        }
+        for (const c of list) if (!seen.has(c.name)) out.push(c)
+        return out
+      })
+      dbReorder(names, groups).catch((e) => setError(message(e)))
     },
   }
 }

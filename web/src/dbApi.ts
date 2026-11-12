@@ -29,6 +29,8 @@ export interface DbConn {
   password?: string
   autoCommit: boolean
   mcp: McpAccess
+  /** optional, groups connections like services */
+  group?: string
 }
 
 export interface DbView extends DbConn {
@@ -93,6 +95,11 @@ export async function dbReloadFile() {
   return post<{ added: string[]; removed: string[]; changed: string[]; total: number }>('/api/dbconn/reload')
 }
 
+/** Persist a new order for all connections, and optionally a new group per name. */
+export async function dbReorder(names: string[], groups: Record<string, string>) {
+  await check(await fetch('/api/dbconn/order', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ names, groups }) }))
+}
+
 export async function dbList(): Promise<DbView[]> {
   return (await check(await fetch('/api/dbconn'))).json()
 }
@@ -110,6 +117,12 @@ export async function dbDelete(name: string) {
 
 export const dbTest = (c: DbConn, existing: string | null) =>
   post<{ ok: boolean; message?: string; error?: string }>('/api/dbconn/test', { ...c, existing: existing ?? '' })
+
+/** Read the alias names defined in a tnsnames.ora file. */
+export async function dbTnsAliases(path: string): Promise<string[]> {
+  const r = await check(await fetch(`/api/dbconn/tns?path=${enc(path)}`))
+  return (await r.json()).aliases ?? []
+}
 
 export const dbRun = (name: string, sql: string, maxRows: number, offset = 0) => post<DbResult>(`/api/db/${enc(name)}/query`, { sql, maxRows, offset })
 export const dbCommit = (name: string) => post<DbView>(`/api/db/${enc(name)}/commit`)

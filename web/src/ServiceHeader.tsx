@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
 import type { Action, Info, State } from './api'
 import { ClearIcon, EditIcon, ExternalIcon, HammerIcon, PlayIcon, RestartIcon, SearchIcon, StopIcon } from './icons'
+import { SHORTCUTS } from './SettingsPanel'
 import { ServiceStats } from './ServiceStats'
 import { ACTIVE, Btn, StatusIcon, statusLabel, uptime } from './ui'
 
@@ -56,7 +57,26 @@ export function ServiceHeader({ current, state, run, onEdit, filter, setFilter, 
           </label>
         </div>
       ) : (
-        <div className="toolbar muted">No service selected</div>
+        <div className="no-service">
+          <div className="no-service-shortcuts">
+            <h3>Keyboard shortcuts</h3>
+            {SHORTCUTS.map(([title, list]) => (
+              <div key={title} className="shortcut-group">
+                <div className="shortcut-title">{title}</div>
+                {list.map(([keys, label]) => (
+                  <div key={label} className="hint">
+                    <span className="keys">
+                      {keys.map((k) => (
+                        <kbd key={k}>{k}</kbd>
+                      ))}
+                    </span>
+                    <span>{label}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
       {current && (
         <div className="subbar" title={current.cwd}>
