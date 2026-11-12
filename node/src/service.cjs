@@ -44,7 +44,7 @@ class Service {
     this.mgr = mgr; this.name = cfg.name
     this.logs = []; this.seq = 0
     this.status = 'stopped'; this.pid = 0; this.exitCode = undefined; this.startedAt = 0; this.restarts = 0
-    this.launchSeq = 0; this.proc = null; this.done = null; this.stopRequested = false; this.gen = 0; this.readyD = null
+    this.launchSeq = 0; this.proc = null; this.stats = null; this.done = null; this.stopRequested = false; this.gen = 0; this.readyD = null
     this.setConfig(cfg)
   }
   setConfig(cfg) { // new settings apply on the next start
@@ -59,6 +59,8 @@ class Service {
       noChanges: c.changes ? undefined : true, changesIgnore: c.changesIgnore.length ? c.changesIgnore : undefined,
     }
     if (this.startedAt && ACTIVE.includes(this.status)) i.startedAt = this.startedAt
+    const st = this.stats // CPU (percent of one core, after two samples) and memory (bytes) of the process tree, only while a process runs
+    if (this.proc && st && st.proc === this.proc) { if (st.mem) i.mem = st.mem; if (st.cpuOK) i.cpu = st.cpu }
     if (c.ready) i.ready = c.ready.port > 0 ? 'port ' + c.ready.port : 'log /' + c.ready.log + '/'
     return i
   }

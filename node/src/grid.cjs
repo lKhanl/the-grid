@@ -5,14 +5,22 @@ const { load: loadConfig, environ, checkRuntime } = require('./config.cjs')
 const { Service } = require('./service.cjs')
 const { stripAnsi } = require('./util.cjs')
 const { createApi } = require('./api.cjs')
-const { WebSocketServer } = require('ws')
-let nodePty = null
-try { nodePty = require('node-pty') } catch (e) { console.error('node-pty not available, terminals use plain pipes:', e.message.split('\n')[0]) }
+const { createGit } = require('./git.cjs')
+const { openStore, createWorkspaces, gridDir } = require('./workspaces.cjs')
+const { createStats } = require('./stats.cjs')
+const { createDb } = require('./db.cjs')
+const { McpServer, serveStdio, handleHttp: mcpHttp, parseFlags } = require('./mcp.cjs')
 const WIN = process.platform === 'win32'
 const VERSION = '0.0.2-nodepoc'
-const PORT = Number(process.env.GRID_PORT || 18900)
 const [cmd = 'serve', ...args] = process.argv.slice(2)
-if (cmd !== 'serve') cli(); else serve()
+const PORT = parseFlags(args, Number(process.env.GRID_PORT || 18900)).port // -p wins over $GRID_PORT
+if (cmd === 'mcp') mcpStdio(); else if (cmd !== 'serve') cli(); else serve()
+
+// `mcp`: the MCP server on stdin / stdout for an AI agent; it talks to the running Grid on -p / $GRID_PORT
+function mcpStdio() {
+  const f = parseFlags(args, PORT)
+  serveStdio(new McpServer({ port: f.port, version: VERSION, defaultWait: f.wait > 0 ? f.wait * 1000 : undefined })).then(() => process.exit(0))
+}
 
 function loadUI() { // embedded (bundle) or ./ui next to the script (dev)
   try { return require('./ui-embed.cjs') } catch {}
@@ -28,9 +36,16 @@ const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript', css: 'te
 const LOG_LINE_OPTIONS = [1000, 2500, 5000, 10000]
 
 function serve() {
+  const { WebSocketServer } = require('ws')
+  let nodePty = null
+  try { nodePty = require('node-pty') } catch (e) { console.error('node-pty not available, terminals use plain pipes:', e.message.split('\n')[0]) }
   const flag = args.find(a => a.startsWith('--config='))
-  const cfgFile = path.resolve(flag ? flag.slice(9) : 'grid.yaml')
-  const base = path.dirname(cfgFile)
+  // ~/.grid/state.json: recent workspaces (shared with the Go version); null when there is no usable home folder
+  let store = null; try { store = openStore() } catch (e) { console.error('warning: no ~/.grid state (recent workspaces disabled):', e.message) }
+  // --config wins; else ./grid.yaml; else the last opened workspace
+  let cfgFile = path.resolve(flag ? flag.slice(9) : 'grid.yaml')
+  if (!flag && !fs.existsSync(cfgFile) && store) { try { cfgFile = store.last() || cfgFile } catch {} }
+  let base = path.dirname(cfgFile)
   const ui = loadUI()
   let cfg, svcs = {}
   const clients = new Set()
@@ -47,7 +62,7 @@ function serve() {
     logLineOptions: LOG_LINE_OPTIONS,
     runtimes: [...cfg.runtimes.values()].map(rt => ({ name: rt.name, type: rt.type, home: rt.home, error: checkRuntime(rt) || undefined })),
     services: Object.values(svcs).map(v => v.info()),
-    features: [], logFileMax: 0, logFiles: settings.logFiles,
+    features: db.features(), logFileMax: 0, logFiles: settings.logFiles,
   })
   const snapshot = (withLogs) => {
     const ev = { type: 'snapshot', state: state(), terms: [...terms.values()].map(termInfo) }
@@ -64,9 +79,34 @@ function serve() {
     await Promise.all(Object.values(old).map(v => v.stop().catch(() => {})))
   }
   try { cfg = loadConfig(cfgFile); for (const s of cfg.services) svcs[s.name] = new Service(mgr, s) } catch (e) { console.error(e.message); process.exit(1) }
+  if (store) { try { store.touch(cfg.path, cfg.name) } catch (e) { console.error('~/.grid state:', e.message) } }
+
+  // Replaces the whole workspace (port of Manager.Switch): the new file is loaded first (nothing changes when it is invalid), then
+  // its services take the place of the old ones, which are stopped. Terminals stay open. cfg is a new object, which empties git's cache.
+  async function switchTo(file) {
+    const next = loadConfig(file), old = svcs
+    cfg = next; cfgFile = next.path; base = next.dir; svcs = {}
+    for (const s of next.services) svcs[s.name] = new Service(mgr, s)
+    await Promise.all(Object.values(old).map(v => v.stop().catch(() => {})))
+    send(snapshot(false))
+  }
 
   // editing grid.yaml, wizard helpers, folder picker (api.cjs); after a write the file is read again and the UI gets a snapshot
-  const configApi = createApi({ file: cfgFile, base, svcs: () => svcs, state, reload: async () => { await load(); send(snapshot(false)) } })
+  const configApi = createApi({ get file() { return cfgFile }, get base() { return base }, svcs: () => svcs, state, reload: async () => { await load(); send(snapshot(false)) } })
+
+  // git changes panel (git.cjs): the repositories of the services' folders; cfg is a new object on every load, which empties its cache
+  // recent workspaces and switching (workspaces.cjs)
+  const workspaces = createWorkspaces({ store, current: () => cfgFile, switchTo, name: () => cfg.name, state })
+
+  // CPU / memory of the running services' process trees (stats.cjs), sampled only while a UI is connected; fields ride on the service info events
+  const stats = createStats({ svcs: () => svcs, clients: () => clients.size, publish: v => v.publish() })
+
+  // the Database panel (db.cjs): saved connections in ~/.grid/connections.json, the SQL sessions, the guarded AI access. Its drivers load on first use;
+  // one that cannot be loaded drops its kind from the features
+  const db = createDb({ home: gridDir(), onChange: () => send(snapshot(false)) })
+  const mcpServer = new McpServer({ port: PORT, version: VERSION }) // for POST /mcp: the same tools as `grid mcp`, calling this server's own API
+
+  const gitApi = createGit({ svcs: () => svcs, generation: () => cfg })
 
   // "all", a service name or a group name
   function resolve(target) {
@@ -132,6 +172,8 @@ function serve() {
     const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)) }
     const body = () => new Promise(r => { let b = ''; req.on('data', c => b += c); req.on('end', () => r(b ? JSON.parse(b) : {})) })
     if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.host || '')) return json({ error: 'bad host' }, 403)
+    // MCP over HTTP: clients such as Claude Code do not send X-Grid, so it has its own guard (Host above, Origin and Content-Type in mcp.cjs)
+    if (p === '/mcp') return mcpHttp(mcpServer, req, res).catch(e => json({ error: e.message }, 500))
     if (req.method !== 'GET' && !req.headers['x-grid']) return json({ error: 'missing X-Grid header' }, 403)
     try {
       if (p === '/api/events') {
@@ -166,7 +208,9 @@ function serve() {
         send(snapshot(false)); return json(state())
       }
       if (await configApi.handle(req, res, u, json)) return
-      if (p === '/api/workspaces') return json({ workspaces: [] })
+      if (await gitApi.handle(req, res, u, json)) return
+      if (await workspaces.handle(req, res, u, json)) return
+      if (await db.handle(req, res, u, json)) return
       if (p === '/api/terms/shells') return json(shells())
       if (p === '/api/terms' && req.method === 'GET') return json([...terms.values()].map(termInfo))
       if (p === '/api/terms' && req.method === 'POST') { try { return json(termInfo(openTerm(await body()))) } catch (e) { return json({ error: e.message }, 400) } }
@@ -201,7 +245,7 @@ function serve() {
     for (const v of Object.values(svcs)) if (v.cfg.autostart) v.start().catch(() => {})
     if (!args.includes('--no-browser')) execFile(WIN ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open', WIN ? ['/c', 'start', '', `http://127.0.0.1:${PORT}`] : [`http://127.0.0.1:${PORT}`], () => {})
   })
-  const bye = async () => { terms.forEach(t => !t.exited && t.kill()); await Promise.all(Object.values(svcs).map(v => v.stop().catch(() => {}))); process.exit(0) }
+  const bye = async () => { stats.close(); await db.close().catch(() => {}); terms.forEach(t => !t.exited && t.kill()); await Promise.all(Object.values(svcs).map(v => v.stop().catch(() => {}))); process.exit(0) }
   process.on('SIGINT', bye); process.on('SIGTERM', bye)
 }
 

@@ -12,6 +12,9 @@
   "type": "commonjs",
   "dependencies": {
     "node-pty": "^1.1.0",
+    "oracledb": "^26.0.0",
+    "pg": "^8.23.1",
+    "pg-cursor": "^2.22.1",
     "ws": "^8.22.2",
     "yaml": "^2.9.1"
   },
