@@ -4,6 +4,7 @@
 //   Streamable HTTP:  POST /mcp on the running Grid (handleHttp, wired in grid.cjs), JSON responses only, no sessions
 // Kept deliberately small (a few tools, short plain-text answers) so that modest models handle it reliably and spend few tokens.
 const http = require('http')
+const YAML = require('yaml')
 const { where } = require('./dbstore.cjs')
 
 const SUPPORTED = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'] // newest first
@@ -12,7 +13,24 @@ const MAX_LINE_LEN = 400, MAX_LOG_TEXT = 8000
 const MAX_CELL_LEN = 120, MAX_DB_TEXT = 12000, DEFAULT_DB_ROWS = 50, MAX_DB_ROWS = 500
 
 const DB_INSTRUCTIONS = ' Databases the user shared are reachable with db_list, db_tables, db_describe and db_query (read-only; always describe a table before querying it).'
-const INSTRUCTIONS = "Controls the services of The Grid. Use restart after changing a service's code, then read the log tail it returns (only what that start produced). After editing grid.yaml (services, runtimes) or the database connections, call reload. To look into a problem use logs with level=error, grep or since_restart instead of reading many lines; describe tells where a service lives and how it runs." + DB_INSTRUCTIONS + ' Builds can be slow: if restart says the service is still building or starting, that is NOT a failure; call wait (never restart again) until it is running.'
+const CONFIG_INSTRUCTIONS = ' The services and runtimes are defined in the Grid\'s config file (grid.yaml): never open, read or edit that file (or its .bak / .tmp) yourself. describe shows a service\'s settings and runtimes lists the runtimes; to change them use service_add, service_edit, service_remove, runtime_add, runtime_edit and runtime_remove. The Grid checks every change, keeps the file\'s comments, and applies it at once (no reload needed); a running service uses its new settings after a restart.'
+const INSTRUCTIONS = "Controls the services of The Grid. Use restart after changing a service's code, then read the log tail it returns (only what that start produced). To look into a problem use logs with level=error, grep or since_restart instead of reading many lines; describe tells where a service lives and how it runs." + CONFIG_INSTRUCTIONS + DB_INSTRUCTIONS + ' Builds can be slow: if restart says the service is still building or starting, that is NOT a failure; call wait (never restart again) until it is running.'
+
+// the settings of a service, as the agent writes them (grid.yaml's keys)
+const SERVICE_SETTINGS = 'Settings use grid.yaml\'s keys. ' +
+  'type: spring-boot | node | script | jar | custom (default custom). cwd: the project folder (absolute, or relative to the config file). ' +
+  'command: the command line, only for type custom. ' +
+  'spring: {module (Maven module, multi-module projects), profiles: [..], jvm_args, args, mode: package | run (default package: mvn package then java -jar), skip_tests (default true), offline, always_build}. ' +
+  'node: {script (package.json script, required, e.g. dev), args, install: if-changed | always | never, package_manager: auto | npm | yarn | pnpm}. ' +
+  'script: {file (required), args}. jar: {file (required), jvm_args, args}. ' +
+  'runtime: a runtime name or a list of them (see runtimes; at most one java and one node). env: {NAME: value}. env_file: a .env file. ' +
+  'encoding: auto | utf-8 | cp1254 (cp1254 for Windows Java logs with Turkish characters). depends_on: [service names started first]. ' +
+  'ready: {port: 8080} or {log: regex of a log line}, optional timeout like 3m; without it the service counts as running at once. ' +
+  'restart: no | on-failure | always, max_restarts. autostart: true starts it with the Grid. stop_timeout: e.g. 10s. url: link shown in the UI. ' +
+  'group, description: shown in the UI. shell: the shell for the command. changes: false stops watching the folder for changes, changes_ignore: [glob patterns].'
+const RUNTIME_SETTINGS = 'Settings: type: java | node | script (default from the name: java*/jdk*/jre* = java, node* = node, else script). ' +
+  'home: the installation folder (required; for java the JAVA_HOME). bin: the folder with the executables, if not home/bin. env: {NAME: value} set for the services that use it.'
+const RENAME = { type: 'string', description: 'new name, to rename it (references to it are renamed too)' }
 
 const obj = (properties, required) => ({ type: 'object', properties, ...(required ? { required } : {}) })
 const SERVICE = { type: 'string', description: 'service name, see status' }
@@ -31,7 +49,7 @@ const TOOLS = [
       context: { type: 'integer', description: 'with level / grep: also show this many lines after each match, e.g. 5 for a stack trace (default 0, max 20)' },
     }, ['service']),
   },
-  { name: 'describe', description: 'Everything known about one service: state, folder, build and run command, URL, readiness check, dependencies, runtimes.', inputSchema: obj({ service: SERVICE }, ['service']) },
+  { name: 'describe', description: 'Everything known about one service: state, folder, build and run command, URL, readiness check, dependencies, runtimes, and its settings as written in the config.', inputSchema: obj({ service: SERVICE }, ['service']) },
   {
     name: 'restart',
     description: 'Restart a service (or start / stop it), wait until it is running or has failed, and return the result with the last log lines. Use after changing code. Slow builds: if the answer says STILL BUILDING / STARTING, it is not a failure; call wait, do not restart again.',
@@ -43,8 +61,53 @@ const TOOLS = [
   },
   {
     name: 'reload',
-    description: 'Re-read the config after it was changed outside the Grid UI: grid.yaml (services, runtimes, env) and, in builds with the Database panel, the saved database connections. Call it after adding, editing or removing a service, runtime or database connection in those files; until then the Grid keeps the old config. Removed services are stopped; running services keep running and use their new settings at the next restart.',
+    description: 'Re-read the config and the saved database connections after the USER changed those files by hand. Not needed after the service_* / runtime_* tools, which apply their change at once. Removed services are stopped; running services keep running and use their new settings at the next restart.',
     inputSchema: obj({}),
+  },
+  {
+    name: 'service_add',
+    description: 'Add a new service to the Grid (it is checked and saved in the config; it starts stopped). ' + SERVICE_SETTINGS + ' Example: {"name": "orders-api", "config": {"type": "spring-boot", "cwd": "C:/dev/orders", "runtime": "java17", "spring": {"profiles": ["local"]}, "ready": {"port": 8081}, "url": "http://localhost:8081"}}',
+    inputSchema: obj({
+      name: { type: 'string', description: "new service name: letters, digits, '.', '_' or '-'" },
+      config: { type: 'object', description: 'the settings (grid.yaml keys, see the tool description)' },
+    }, ['name', 'config']),
+  },
+  {
+    name: 'service_edit',
+    description: 'Change settings of a service. Give only what changes; null removes a setting. spring, node, script, jar and env are merged key by key (null removes one key there); other values are replaced as a whole. Settings not mentioned and comments in the config stay as they are. Call describe first to see the current settings. ' + SERVICE_SETTINGS,
+    inputSchema: obj({
+      name: SERVICE,
+      change: { type: 'object', description: 'settings to change, e.g. {"spring": {"profiles": ["local", "debug"]}, "ready": {"port": 8085}, "url": null}' },
+      rename: RENAME,
+    }, ['name']),
+  },
+  {
+    name: 'service_remove',
+    description: 'Remove a service from the config. It must be stopped first (restart action=stop), and no other service may depend on it.',
+    inputSchema: obj({ name: SERVICE }, ['name']),
+  },
+  { name: 'runtimes', description: 'List the runtimes (JDKs, Node installations, tool folders) with their settings and whether their folder is found.', inputSchema: obj({}) },
+  {
+    name: 'runtime_add',
+    description: 'Add a runtime that services can use with their runtime setting. ' + RUNTIME_SETTINGS + ' Example: {"name": "java17", "config": {"home": "C:/tools/jdk-17"}}',
+    inputSchema: obj({
+      name: { type: 'string', description: "new runtime name: letters, digits, '.', '_' or '-'" },
+      config: { type: 'object', description: 'the settings (see the tool description)' },
+    }, ['name', 'config']),
+  },
+  {
+    name: 'runtime_edit',
+    description: 'Change settings of a runtime. Give only what changes; null removes a setting; env is merged key by key. ' + RUNTIME_SETTINGS,
+    inputSchema: obj({
+      name: { type: 'string', description: 'runtime name, see runtimes' },
+      change: { type: 'object', description: 'settings to change, e.g. {"home": "C:/tools/jdk-17.0.12"}' },
+      rename: RENAME,
+    }, ['name']),
+  },
+  {
+    name: 'runtime_remove',
+    description: 'Remove a runtime from the config. If services use it this fails, unless detach is true: then it is also taken off those services.',
+    inputSchema: obj({ name: { type: 'string', description: 'runtime name, see runtimes' }, detach: { type: 'boolean', description: 'also remove it from the services that use it' } }, ['name']),
   },
   {
     name: 'wait',
@@ -85,6 +148,19 @@ const TOOLS = [
     inputSchema: obj({ connection: CONNECTION, sql: { type: 'string', description: 'one statement' } }, ['connection', 'sql']),
   },
 ]
+
+// an object argument; some models send it as a JSON string
+function objArg(v, key, optional) {
+  if ((v === undefined || v === null) && optional) return {}
+  if (typeof v === 'string') { try { v = JSON.parse(v) } catch { throw new Error(`${key} must be an object, not text`) } }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error(`${key} must be an object of settings`)
+  return v
+}
+// settings as indented YAML lines (what an agent knows best)
+function yamlBlock(o) {
+  const t = YAML.stringify(o && Object.keys(o).length ? o : {}, { lineWidth: 0 }).replace(/\n+$/, '')
+  return t.split('\n').map(l => '  ' + l).join('\n')
+}
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const str = (a, k) => (typeof a[k] === 'string' ? a[k] : '')
@@ -250,6 +326,13 @@ class McpServer {
       case 'restart': return this.restart(str(args, 'service'), str(args, 'action') || 'restart', this.waitArg(args), progress)
       case 'wait': return this.waitTool(str(args, 'service'), this.waitArg(args), progress)
       case 'reload': return this.reload()
+      case 'service_add': return this.serviceAdd(str(args, 'name'), args.config)
+      case 'service_edit': return this.serviceEdit(str(args, 'name'), args.change, str(args, 'rename'))
+      case 'service_remove': return this.serviceRemove(str(args, 'name'))
+      case 'runtimes': return this.runtimes()
+      case 'runtime_add': return this.runtimeAdd(str(args, 'name'), args.config)
+      case 'runtime_edit': return this.runtimeEdit(str(args, 'name'), args.change, str(args, 'rename'))
+      case 'runtime_remove': return this.runtimeRemove(str(args, 'name'), args.detach === true)
       case 'db_list': return this.dbList()
       case 'db_tables': return this.dbTables(str(args, 'connection'), str(args, 'schema'), str(args, 'search'))
       case 'db_describe': return this.dbDescribe(str(args, 'connection'), str(args, 'schema'), str(args, 'table'))
@@ -333,7 +416,68 @@ class McpServer {
     if (v.pid > 0) line('pid', v.pid)
     if (v.restarts > 0) line('auto restarts', v.restarts)
     line('resources', resources(v).trim()); line('log file', v.logFile)
+    try {
+      const raw = JSON.parse(await this.get(`/api/config/raw/services/${encodeURIComponent(service)}`))
+      b += '\nsettings (change them with service_edit):\n' + yamlBlock(raw)
+    } catch { /* the rest is still useful */ }
     return b
+  }
+
+  // ---- editing the config (services and runtimes) through the Grid, which checks, saves and applies every change ----
+  async serviceAdd(name, config) {
+    if (!name) throw new Error('name is required')
+    await this.request('POST', '/api/config/raw/services', { name, config: objArg(config, 'config') })
+    return `service ${name} added (stopped; start it with restart action=start).\n` + (await this.describe(name))
+  }
+  async serviceEdit(name, change, rename) {
+    const before = await this.find(name)
+    const r = JSON.parse(await this.request('PATCH', `/api/config/raw/services/${encodeURIComponent(name)}`, { change: objArg(change, 'change', true), rename }))
+    const now = rename || name
+    if (!r.changed) return `nothing changed: ${name} already has these settings.`
+    let out = rename && rename !== name ? `service ${name} renamed to ${now} and saved.` : `service ${now} saved.`
+    if (before.status !== 'stopped' && before.status !== 'exited' && before.status !== 'crashed') out += ` It is ${before.status} with the old settings; restart it to use the new ones.`
+    return out + '\n' + (await this.describe(now))
+  }
+  async serviceRemove(name) {
+    const v = await this.find(name)
+    if (!['stopped', 'exited', 'crashed'].includes(v.status)) throw new Error(`${name} is ${v.status}; stop it first (restart action=stop), then remove it`)
+    await this.request('DELETE', `/api/config/services/${encodeURIComponent(name)}`)
+    return `service ${name} removed from the config.`
+  }
+  async runtimes() {
+    const raw = JSON.parse(await this.get('/api/config/raw/runtimes')), names = Object.keys(raw)
+    if (!names.length) return 'No runtimes. Add one with runtime_add.'
+    const st = JSON.parse(await this.get('/api/state')), info = new Map((st.runtimes || []).map(r => [r.name, r]))
+    const users = new Map()
+    for (const v of st.services || []) for (const r of v.runtimes || []) users.set(r, [...(users.get(r) || []), v.name])
+    return names.map(n => {
+      const i = info.get(n) || {}
+      let s = `${n}: ${i.type || ''}${i.error ? ' - PROBLEM: ' + i.error : ' - ok'}`
+      if (users.has(n)) s += `\n  used by: ${users.get(n).join(', ')}`
+      return s + '\n' + yamlBlock(raw[n])
+    }).join('\n')
+  }
+  async runtimeLine(name) {
+    const st = JSON.parse(await this.get('/api/state')), r = (st.runtimes || []).find(x => x.name === name)
+    if (!r) return ''
+    return r.error ? `\nPROBLEM: ${r.error} (services using it will not start)` : `\n${r.type} at ${r.home}: found.`
+  }
+  async runtimeAdd(name, config) {
+    if (!name) throw new Error('name is required')
+    await this.request('POST', '/api/config/raw/runtimes', { name, config: objArg(config, 'config') })
+    return `runtime ${name} added.` + (await this.runtimeLine(name))
+  }
+  async runtimeEdit(name, change, rename) {
+    if (!name) throw new Error('name is required')
+    const r = JSON.parse(await this.request('PATCH', `/api/config/raw/runtimes/${encodeURIComponent(name)}`, { change: objArg(change, 'change', true), rename }))
+    if (!r.changed) return `nothing changed: ${name} already has these settings.`
+    const now = rename || name
+    return (rename && rename !== name ? `runtime ${name} renamed to ${now} and saved.` : `runtime ${now} saved.`) + ' Running services use it after a restart.' + (await this.runtimeLine(now))
+  }
+  async runtimeRemove(name, detach) {
+    if (!name) throw new Error('name is required')
+    await this.request('DELETE', `/api/config/runtimes/${encodeURIComponent(name)}${detach ? '?detach=1' : ''}`)
+    return `runtime ${name} removed from the config.`
   }
 
   async restart(service, action, wait, progress) {

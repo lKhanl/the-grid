@@ -423,8 +423,83 @@ function deleteRuntime(file, name, detach) {
       }
     }
     rts.items.splice(i, 1)
+    if (i === 0 && rts.items.length && rts.items[0].key) rts.items[0].key.spaceBefore = false // it is the first one now
     if (!rts.items.length) root.items.splice(find(root, 'runtimes'), 1)
   })
 }
 
-module.exports = { readSpec, readRuntime, saveService, deleteService, reorderServices, saveRuntime, deleteRuntime, previewSpec, mergeLayout }
+// ---- the same operations with grid.yaml's own keys (for the MCP tools: an agent knows the file format, not the UI's form) ----
+// Every key the writers understand; a key outside these lists is refused instead of being silently dropped.
+const SERVICE_KEYS = new Set(SERVICE_ORDER)
+const BLOCK_KEYS = { spring: SPRING_ORDER, node: NODE_ORDER, script: SCRIPT_ORDER, jar: JAR_ORDER, ready: ['port', 'log', 'timeout'] }
+const RUNTIME_KEYS = new Set(RUNTIME_ORDER)
+const MERGED = new Set(['spring', 'node', 'script', 'jar', 'env']) // nested maps a change is merged into; anything else is replaced
+const plain = v => !!v && typeof v === 'object' && !Array.isArray(v)
+
+function checkKeys(cfg, keys, what) {
+  if (!plain(cfg)) fail(`${what}: expected an object of settings`)
+  for (const [k, v] of Object.entries(cfg)) {
+    if (!keys.has(k)) fail(`${what}: unknown setting "${k}" (known: ${[...keys].join(', ')})`)
+    const sub = BLOCK_KEYS[k]
+    if (sub && keys === SERVICE_KEYS && v !== null) {
+      if (!plain(v)) fail(`${what}: "${k}" must be an object (keys: ${sub.join(', ')})`)
+      for (const sk of Object.keys(v)) if (!sub.includes(sk)) fail(`${what}: unknown setting "${k}.${sk}" (known: ${sub.join(', ')})`)
+      if (k === 'ready' && !(Number(v.port) > 0) && !str(v.log)) fail(`${what}: "ready" needs port or log (null removes the readiness check)`)
+    }
+    if (k === 'env' && v !== null && !plain(v)) fail(`${what}: "env" must be an object of NAME: value`)
+  }
+}
+// cur with the change applied: null removes a key, the maps in MERGED are merged key by key (null removes there too), the rest is replaced
+function mergeChange(cur, change) {
+  const out = { ...(plain(cur) ? cur : {}) }
+  for (const [k, v] of Object.entries(change)) {
+    if (v === null) delete out[k]
+    else if (MERGED.has(k) && plain(v) && plain(out[k])) {
+      const m = { ...out[k] }
+      for (const [sk, sv] of Object.entries(v)) { if (sv === null) delete m[sk]; else m[sk] = sv }
+      out[k] = m
+    } else out[k] = v
+  }
+  return out
+}
+const readServiceRaw = (file, name) => obj(readEntry(file, r => servicesOf(r, false), name, 'service')) || {}
+const readRuntimeRaw = (file, name) => obj(readEntry(file, r => runtimesOf(r, false), name, 'runtime')) || {}
+// all entries of a section as plain objects (an absent section is empty)
+function readSection(file, which) {
+  const doc = readDoc(file), root = isMap(doc.contents) ? doc.contents : null
+  const m = root && (which === 'runtimes' ? runtimesOf(root, false) : servicesOf(root, false))
+  const out = {}
+  if (m) for (const p of m.items) out[keyOf(p)] = obj(nodeJS(doc, p.value)) || {}
+  return out
+}
+
+function addServiceRaw(file, name, cfg) {
+  name = str(name).trim(); checkName(name); checkKeys(cfg, SERVICE_KEYS, `service "${name}"`)
+  return saveService(file, '', specFromRaw(name, mergeChange({}, cfg)))
+}
+// change: only the keys to change; rename: the new name or ''
+function editServiceRaw(file, name, change, rename) {
+  checkKeys(change || {}, SERVICE_KEYS, `service "${name}"`)
+  const to = str(rename).trim() || name; checkName(to)
+  return saveService(file, name, specFromRaw(to, mergeChange(readServiceRaw(file, name), change || {})))
+}
+function runtimeSpec(name, raw) {
+  return { name, type: str(raw.type).trim().toLowerCase() || inferType(name), home: str(raw.home), bin: str(raw.bin), env: envList(raw.env) }
+}
+function addRuntimeRaw(file, name, cfg) {
+  name = str(name).trim(); checkName(name); checkKeys(cfg, RUNTIME_KEYS, `runtime "${name}"`)
+  return saveRuntime(file, '', runtimeSpec(name, mergeChange({}, cfg)))
+}
+function editRuntimeRaw(file, name, change, rename) {
+  checkKeys(change || {}, RUNTIME_KEYS, `runtime "${name}"`)
+  const to = str(rename).trim() || name; checkName(to)
+  const cur = readRuntimeRaw(file, name), next = mergeChange(cur, change || {})
+  // a rename keeps the type the old name implied, unless the change sets one
+  if (!str(next.type).trim()) next.type = str(cur.type).trim() || inferType(name)
+  return saveRuntime(file, name, runtimeSpec(to, next))
+}
+
+module.exports = {
+  readSpec, readRuntime, saveService, deleteService, reorderServices, saveRuntime, deleteRuntime, previewSpec, mergeLayout,
+  readServiceRaw, readRuntimeRaw, readSection, addServiceRaw, editServiceRaw, addRuntimeRaw, editRuntimeRaw,
+}

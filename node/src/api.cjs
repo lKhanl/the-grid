@@ -90,6 +90,26 @@ function createApi(ctx) {
       }
       if (p === '/api/runtimes/probe' && m === 'GET') return json(await probe(u.searchParams)), true
 
+      // ---- the same with grid.yaml's own keys (MCP): { config } adds, { change, rename } edits; the answer says whether the file changed ----
+      if ((mt = p.match(/^\/api\/config\/raw\/(services|runtimes)$/))) {
+        const what = mt[1]
+        if (m === 'GET') { try { json(edit.readSection(ctx.file, what)) } catch (e) { fail(e) }; return true }
+        if (m === 'POST') {
+          const b = await readBody(req), add = what === 'services' ? edit.addServiceRaw : edit.addRuntimeRaw
+          let changed; return await done(() => { changed = add(ctx.file, b.name, b.config) }, () => ({ changed })), true
+        }
+      }
+      if ((mt = p.match(/^\/api\/config\/raw\/(services|runtimes)\/([^/]+)$/))) {
+        const what = mt[1], n = name(2)
+        if (m === 'GET') { try { json(what === 'services' ? edit.readServiceRaw(ctx.file, n) : edit.readRuntimeRaw(ctx.file, n)) } catch (e) { fail(e, 404) }; return true }
+        if (m === 'PATCH') {
+          const b = await readBody(req), to = String(b.rename || '').trim()
+          if (what === 'services' && to && to !== n && isActive(n)) return json({ error: `stop ${n} before renaming it` }, 409), true
+          const save = what === 'services' ? edit.editServiceRaw : edit.editRuntimeRaw
+          let changed; return await done(() => { changed = save(ctx.file, n, b.change, to) }, () => ({ changed })), true
+        }
+      }
+
       // ---- wizard helpers ----
       if (p === '/api/preview' && m === 'POST') { const s = await readBody(req); return json(edit.previewSpec(ctx.base, s)), true }
       if (p === '/api/detect' && m === 'GET') return json(detectDir(resolve(u.searchParams.get('dir')))), true
