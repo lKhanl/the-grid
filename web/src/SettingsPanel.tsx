@@ -60,7 +60,8 @@ export function SettingsPanel({ state, setState, setError, theme, setTheme, neon
             {(
               [
                 ['grid', 'The Grid', 'Electric blue on black, glow.'],
-                ['basic', 'Basic', 'Calm neutral greys, no glow.'],
+                ['basic', 'Dark', 'Calm neutral greys, no glow.'],
+                ['basic-light', 'Light', 'Calm greys on a light ground.'],
               ] as [Theme, string, string][]
             ).map(([id, label, help]) => (
               <button key={id} className={`theme-card ${theme === id ? 'on' : ''}`} onClick={() => setTheme(id)}>

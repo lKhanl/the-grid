@@ -404,7 +404,7 @@ details.form-section[open] summary { margin-bottom: 10px; }
   --accent: #5b7fc7;
   --glow: #8ea6d6;
   --sel: #323844;
-  --hover: #33363b;
+  --hover: #3b3f46;
   --surface: #2b2d31;
   --chip: #2e3035;
   --on: #363c47;
@@ -427,31 +427,74 @@ details.form-section[open] summary { margin-bottom: 10px; }
   --sql-tag: #d5b778;
   --sql-annot: #b3ae60;
 }
-[data-theme='basic'] .topbar { border-bottom-color: var(--border); box-shadow: none; }
-[data-theme='basic'] .btn.primary { color: #fff; box-shadow: none; font-weight: 500; }
-[data-theme='basic'] .activity.on { color: var(--text); }
-[data-theme='basic'] .activity.on::before,
-[data-theme='basic'] .row.drop-before::after, [data-theme='basic'] .row.drop-after::after,
-[data-theme='basic'] .group.drop-before::before, [data-theme='basic'] .group.drop-after::after { box-shadow: none; }
-[data-theme='basic'] .activity-tip { border-color: var(--menu-border); }
-[data-theme='basic'] .badge-running { box-shadow: none; }
+
+/* Basic light: the Basic theme on a light ground (colours only; the shared rules below apply to both). */
+[data-theme='basic-light'] {
+  color-scheme: light;
+  --ink: #1f2328; /* brand name, anything that used the Neon ink */
+  --ink-muted: #646a73;
+  --ink-dim: #8a8f98;
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --panel-2: #f0f1f4;
+  --border: #d5d8de;
+  --text: #1f2328;
+  --muted: #646a73;
+  --accent: #3f64b5;
+  --glow: #5b7fc7;
+  --sel: #dde5f4;
+  --hover: #dde2ea;
+  --surface: #fafbfc;
+  --chip: #eceef2;
+  --on: #dbe4f5;
+  --line: #e3e5ea;
+  --sunk: #ffffff;
+  --tip: #2f3237;
+  --menu: #ffffff;
+  --menu-border: #c9cdd4;
+  --menu-line: #e3e5ea;
+  --hover-border: #a9aeb7;
+  --link: #2f5bb0;
+  --green: #1a8f55;
+  --red: #d13438;
+  --yellow: #9a6a00;
+  --orange: #c4570f;
+  --sql-keyword: #a8501f;
+  --sql-string: #2f7d3a;
+  --sql-number: #0f7480;
+  --sql-comment: #838790;
+  --sql-type: #a8501f;
+  --sql-op: #3a3d44;
+  --sql-fn: #1c62b8;
+  --sql-prop: #8b3f86;
+  --sql-tag: #8a6a14;
+  --sql-annot: #7c7720;
+}
+:is([data-theme='basic'], [data-theme='basic-light']) .topbar { border-bottom-color: var(--border); box-shadow: none; }
+:is([data-theme='basic'], [data-theme='basic-light']) .btn.primary { color: #fff; box-shadow: none; font-weight: 500; }
+:is([data-theme='basic'], [data-theme='basic-light']) .activity.on { color: var(--text); }
+:is([data-theme='basic'], [data-theme='basic-light']) .activity.on::before,
+:is([data-theme='basic'], [data-theme='basic-light']) .row.drop-before::after, :is([data-theme='basic'], [data-theme='basic-light']) .row.drop-after::after,
+:is([data-theme='basic'], [data-theme='basic-light']) .group.drop-before::before, :is([data-theme='basic'], [data-theme='basic-light']) .group.drop-after::after { box-shadow: none; }
+:is([data-theme='basic'], [data-theme='basic-light']) .activity-tip { border-color: var(--menu-border); }
+:is([data-theme='basic'], [data-theme='basic-light']) .badge-running { box-shadow: none; }
 /* runtime chips, icons and type cards lose their colours */
-[data-theme='basic'] .chip-java, [data-theme='basic'] .chip-node, [data-theme='basic'] .chip-script,
-[data-theme='basic'] .chip.toggle.chip-java.on, [data-theme='basic'] .chip.toggle.chip-node.on, [data-theme='basic'] .chip.toggle.chip-script.on {
+:is([data-theme='basic'], [data-theme='basic-light']) .chip-java, :is([data-theme='basic'], [data-theme='basic-light']) .chip-node, :is([data-theme='basic'], [data-theme='basic-light']) .chip-script,
+:is([data-theme='basic'], [data-theme='basic-light']) .chip.toggle.chip-java.on, :is([data-theme='basic'], [data-theme='basic-light']) .chip.toggle.chip-node.on, :is([data-theme='basic'], [data-theme='basic-light']) .chip.toggle.chip-script.on {
   background: var(--chip); color: var(--text); border-color: var(--border);
 }
-[data-theme='basic'] .chip.toggle.on { background: var(--on); border-color: var(--accent); color: var(--text); }
-[data-theme='basic'] .rt-icon-java, [data-theme='basic'] .rt-icon-node, [data-theme='basic'] .rt-icon-script,
-[data-theme='basic'] .type-card .type-icon { color: var(--muted); }
-[data-theme='basic'] .type-card.on, [data-theme='basic'] .type-card[class*='svc-'].on, [data-theme='basic'] .type-card[class*='type-'].on {
+:is([data-theme='basic'], [data-theme='basic-light']) .chip.toggle.on { background: var(--on); border-color: var(--accent); color: var(--text); }
+:is([data-theme='basic'], [data-theme='basic-light']) .rt-icon-java, :is([data-theme='basic'], [data-theme='basic-light']) .rt-icon-node, :is([data-theme='basic'], [data-theme='basic-light']) .rt-icon-script,
+:is([data-theme='basic'], [data-theme='basic-light']) .type-card .type-icon { color: var(--muted); }
+:is([data-theme='basic'], [data-theme='basic-light']) .type-card.on, :is([data-theme='basic'], [data-theme='basic-light']) .type-card[class*='svc-'].on, :is([data-theme='basic'], [data-theme='basic-light']) .type-card[class*='type-'].on {
   background: var(--on); border-color: var(--accent);
 }
-[data-theme='basic'] .type-card .detected { background: var(--on); color: var(--text); }
-[data-theme='basic'] .preview-tag.build, [data-theme='basic'] .preview-tag.run { background: var(--chip); color: var(--muted); }
-[data-theme='basic'] .dot-building { background: var(--muted); border-color: var(--muted); }
-[data-theme='basic'] .st-building { color: var(--muted); }
-[data-theme='basic'] .badge-building { background: var(--chip); color: var(--muted); }
-[data-theme='basic'] ::selection { background: rgba(91,127,199,.35); }
+:is([data-theme='basic'], [data-theme='basic-light']) .type-card .detected { background: var(--on); color: var(--text); }
+:is([data-theme='basic'], [data-theme='basic-light']) .preview-tag.build, :is([data-theme='basic'], [data-theme='basic-light']) .preview-tag.run { background: var(--chip); color: var(--muted); }
+:is([data-theme='basic'], [data-theme='basic-light']) .dot-building { background: var(--muted); border-color: var(--muted); }
+:is([data-theme='basic'], [data-theme='basic-light']) .st-building { color: var(--muted); }
+:is([data-theme='basic'], [data-theme='basic-light']) .badge-building { background: var(--chip); color: var(--muted); }
+:is([data-theme='basic'], [data-theme='basic-light']) ::selection { background: rgba(91,127,199,.35); }
 
 /* ---- settings panel ---- */
 .activity-spacer { flex: 1; }
@@ -473,6 +516,10 @@ details.form-section[open] summary { margin-bottom: 10px; }
 .swatch-basic i:nth-child(1) { top: 9px; width: 40%; background: #8c8f96; }
 .swatch-basic i:nth-child(2) { top: 20px; background: #323844; }
 .swatch-basic i:nth-child(3) { top: 31px; width: 55%; background: #5b7fc7; opacity: .7; }
+.swatch-basic-light { background: #f4f5f7; box-shadow: inset 0 0 0 1px #d5d8de; }
+.swatch-basic-light i:nth-child(1) { top: 9px; width: 40%; background: #646a73; }
+.swatch-basic-light i:nth-child(2) { top: 20px; background: #dde5f4; }
+.swatch-basic-light i:nth-child(3) { top: 31px; width: 55%; background: #3f64b5; opacity: .8; }
 .setting-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; cursor: pointer; }
 .setting-row.disabled { opacity: .5; cursor: default; }
 .setting-row .setting-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
@@ -738,8 +785,8 @@ body:has(.side-resizer.dragging) { user-select: none; cursor: col-resize; }
 
 [data-theme='grid'] .row.selected, :root:not([data-theme]) .row.selected { background: var(--accent); box-shadow: 0 0 28px rgba(0,89,255,.45); }
 [data-theme='grid'] .group-head { color: var(--blue-400); }
-[data-theme='basic'] .group-head { color: var(--muted); }
-[data-theme='basic'] .row.selected { box-shadow: none; }
+:is([data-theme='basic'], [data-theme='basic-light']) .group-head { color: var(--muted); }
+:is([data-theme='basic'], [data-theme='basic-light']) .row.selected { box-shadow: none; }
 
 /* ======================================================================
    Grid Neon, part 3: buttons, chips, badges, inputs.
@@ -774,20 +821,20 @@ kbd { border-radius: 8px; }
 .switch { border-radius: var(--radius-pill); }
 .field > span { font-size: 13px; color: var(--muted); }
 .form-section h3 { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .12em; color: var(--blue-400); }
-[data-theme='basic'] .form-section h3 { color: var(--muted); }
-[data-theme='basic'] .btn.text { background: transparent; border-color: var(--border); }
-[data-theme='basic'] .filter:focus, [data-theme='basic'] .field input:focus, [data-theme='basic'] .field textarea:focus,
-[data-theme='basic'] .field select:focus, [data-theme='basic'] .env-row input:focus { box-shadow: none; }
+:is([data-theme='basic'], [data-theme='basic-light']) .form-section h3 { color: var(--muted); }
+:is([data-theme='basic'], [data-theme='basic-light']) .btn.text { background: transparent; border-color: var(--border); }
+:is([data-theme='basic'], [data-theme='basic-light']) .filter:focus, :is([data-theme='basic'], [data-theme='basic-light']) .field input:focus, :is([data-theme='basic'], [data-theme='basic-light']) .field textarea:focus,
+:is([data-theme='basic'], [data-theme='basic-light']) .field select:focus, :is([data-theme='basic'], [data-theme='basic-light']) .env-row input:focus { box-shadow: none; }
 .btn.text.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.text.primary:hover { background: #1a6bff; border-color: #1a6bff; }
 .btn.text.danger { background: #5c2321; border-color: var(--red); }
-[data-theme='basic'] .btn.text.primary { background: var(--accent); border-color: var(--accent); }
+:is([data-theme='basic'], [data-theme='basic-light']) .btn.text.primary { background: var(--accent); border-color: var(--accent); }
 
 /* ======================================================================
    Grid Neon, part 4: modals and forms (settings, shortcuts, errors).
    ====================================================================== */
 .settings h4, .shortcut-title { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .12em; color: var(--blue-400); }
-[data-theme='basic'] .settings h4, [data-theme='basic'] .shortcut-title { color: var(--muted); }
+:is([data-theme='basic'], [data-theme='basic-light']) .settings h4, :is([data-theme='basic'], [data-theme='basic-light']) .shortcut-title { color: var(--muted); }
 kbd { background: var(--surface); border: 1px solid var(--line-glass); border-bottom-width: 3px; border-bottom-color: rgba(140,190,255,.18); color: var(--text); font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; box-shadow: none; }
 .form-error { border-radius: var(--radius-sm); }
 .modal-head { padding: 18px 24px; }
@@ -799,13 +846,13 @@ kbd { background: var(--surface); border: 1px solid var(--line-glass); border-bo
 .menu, .ctx-menu, .context-menu { border-radius: var(--radius-panel); }
 .ctx-item { border-radius: var(--radius-sm); }
 .ctx-title { font-family: var(--font-mono); letter-spacing: .12em; color: var(--blue-400); }
-[data-theme='basic'] .ctx-title { color: var(--muted); }
+:is([data-theme='basic'], [data-theme='basic-light']) .ctx-title { color: var(--muted); }
 
 /* ======================================================================
    Grid Neon, part 5: log, terminal panel, Changes, Database.
    ====================================================================== */
 .term-head-label { font-family: var(--font-mono); letter-spacing: .12em; color: var(--blue-400); }
-[data-theme='basic'] .term-head-label { color: var(--muted); }
+:is([data-theme='basic'], [data-theme='basic-light']) .term-head-label { color: var(--muted); }
 .tab-close { border-radius: var(--radius-pill); }
 .tab-close:hover { background: var(--hover); }
 .term-new { border-radius: var(--radius-panel); }
@@ -813,3 +860,48 @@ kbd { background: var(--surface); border: 1px solid var(--line-glass); border-bo
 .git-count { border-radius: var(--radius-pill); }
 .git-proj { font-family: var(--font-display); font-weight: 500; letter-spacing: -.01em; }
 .diff-note { font-family: var(--font-sans); }
+
+/* ---- Basic light: places that assumed a dark ground ---- */
+[data-theme='basic-light'] .row.selected { color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
+[data-theme='basic-light'] .row.selected .meta,
+[data-theme='basic-light'] .row.selected .status-icon { color: var(--muted); opacity: 1; }
+[data-theme='basic-light'] .row.selected .st-running { color: var(--green); }
+[data-theme='basic-light'] .row.selected .st-crashed { color: var(--red); }
+[data-theme='basic-light'] .row.selected .st-starting,
+[data-theme='basic-light'] .row.selected .st-stopping { color: var(--yellow); }
+[data-theme='basic-light'] .row.selected .st-building { color: var(--muted); }
+[data-theme='basic-light'] kbd { background: linear-gradient(#ffffff, #eceef2); border-color: #c9cdd4; border-bottom-color: #aeb3bb; box-shadow: 0 1px 1px rgba(0,0,0,.08); }
+[data-theme='basic-light'] .db-grid-row, [data-theme='basic-light'] .db-cell { border-color: rgba(0,0,0,.06); }
+[data-theme='basic-light'] .swatch { border-color: rgba(0,0,0,.08); }
+[data-theme='basic-light'] .modal-backdrop { background: rgba(20,24,32,.35); }
+[data-theme='basic-light'] .modal { box-shadow: 0 20px 60px rgba(0,0,0,.18); }
+[data-theme='basic-light'] .ctx-menu, [data-theme='basic-light'] .term-new { box-shadow: 0 10px 30px rgba(0,0,0,.16); }
+[data-theme='basic-light'] ::selection { background: rgba(63,100,181,.25); }
+/* the xterm canvas is white here, so its host and viewport must be too (they use --bg elsewhere) */
+[data-theme='basic-light'] .log-host, [data-theme='basic-light'] .term-host { background: #ffffff; }
+[data-theme='basic-light'] .log-host .xterm-viewport, [data-theme='basic-light'] .term-host .xterm-viewport { background: #ffffff !important; }
+
+/* Basic themes (Dark, Light): a hover must be visible: accent border on buttons, a tinted fill, a clear primary shift */
+:is([data-theme='basic'], [data-theme='basic-light']) .btn.text:hover,
+:is([data-theme='basic'], [data-theme='basic-light']) .btn:hover { border-color: var(--accent); }
+:is([data-theme='basic'], [data-theme='basic-light']) .icon-btn:hover,
+:is([data-theme='basic'], [data-theme='basic-light']) .activity:hover { background: var(--hover); color: var(--text); }
+:is([data-theme='basic'], [data-theme='basic-light']) .btn.primary:hover,
+:is([data-theme='basic'], [data-theme='basic-light']) .btn.text.primary:hover { background: var(--accent); border-color: var(--accent); filter: brightness(1.15); }
+[data-theme='basic-light'] .btn.primary:hover, [data-theme='basic-light'] .btn.text.primary:hover { filter: brightness(.88); }
+
+/* disabled controls: "not allowed" cursor, and no hover feedback (they do nothing) */
+.btn:disabled, .btn[disabled], .ctx-item:disabled, .icon-btn:disabled, .activity:disabled, .chip.toggle:disabled,
+.seg button:disabled, .segmented button:disabled, .setting-row.disabled { cursor: not-allowed; }
+.btn:disabled:hover, .btn.text:disabled:hover { background: none; border-color: transparent; filter: none; }
+[data-theme='grid'] .btn.text:disabled:hover, :root:not([data-theme]) .btn.text:disabled:hover { background: var(--glass); border-color: var(--line-glass); }
+:is([data-theme='basic'], [data-theme='basic-light']) .btn.text:disabled:hover { background: transparent; border-color: var(--border); }
+.btn.primary:disabled:hover, .btn.text.primary:disabled:hover { background: var(--accent); border-color: var(--accent); filter: none; }
+.icon-btn:disabled:hover { background: none; color: var(--muted); }
+
+/* the path input of the Workspaces and folder pickers: same look as the other inputs */
+.picker-bar { align-items: center; }
+.picker-bar input { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-pill); height: 36px; padding: 0 14px; font-size: 14px; outline: none; }
+.picker-bar input::placeholder { color: var(--muted); }
+.picker-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,89,255,.22); }
+:is([data-theme='basic'], [data-theme='basic-light']) .picker-bar input:focus { box-shadow: none; }

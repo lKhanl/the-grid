@@ -12,7 +12,7 @@ const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform)
 /** The log theme hides the cursor; a shell needs one. */
 function shellTheme(theme: Theme) {
   const base = termTheme[theme]
-  return { ...base, cursor: theme === 'grid' ? '#3d8bff' : '#bcbec4', cursorAccent: base.background }
+  return { ...base, cursor: theme === 'grid' ? '#3d8bff' : theme === 'basic-light' ? '#1f2328' : '#bcbec4', cursorAccent: base.background }
 }
 
 export function shellName(path: string) {

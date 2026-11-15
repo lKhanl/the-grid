@@ -123,7 +123,7 @@ export default function App() {
       else if (h.startsWith('edit=')) setForm({ editing: h.slice(5) })
       else if (h === 'runtimes' || h === 'services' || h === 'settings' || h === 'database') setPanel(h as Panel)
       else if (h === 'terminal') setTermOpen(true)
-      else if (h === 'theme=basic' || h === 'theme=grid') setTheme(h.slice(6) as Theme)
+      else if (h === 'theme=basic' || h === 'theme=basic-light' || h === 'theme=grid') setTheme(h.slice(6) as Theme)
       else if (h.startsWith('select=')) setSelected(h.slice(7))
       else if (h.startsWith('runtime=')) setRtForm({ editing: h.slice(8) === 'new' ? null : h.slice(8) })
       if (h) history.replaceState(null, '', location.pathname)
