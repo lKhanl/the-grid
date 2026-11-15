@@ -1,7 +1,3 @@
-> **This branch (`node-poc`) has no Go code.** It holds the Node.js version only: see
-> [`node/`](node/). Run it with `cd node/release && node grid.bundle.cjs serve`.
-> The text below describes the Go version on `master`; not every feature exists here yet.
-
 <p align="center">
   <img src="docs/logo.svg" alt="The Grid" width="96" height="96">
 </p>
@@ -29,54 +25,45 @@ need 3–4 APIs, UIs and scripts running side by side with their logs one click 
   </tr>
 </table>
 
-- One self-contained binary (UI embedded), no install, no admin rights
+- Plain Node.js: one self-contained bundle (UI embedded), no admin rights
 - Groups, start/stop/restart per service, group or all
 - Spring Boot (Maven), Node and script services are detected from the folder; each start
   builds when needed, then runs — no command to write
 - Add / edit / delete services and runtimes from the UI (writes `grid.yaml`, keeps comments)
 - Several JDKs / Node versions side by side (`runtimes`), one per service
-- **Changes** view: read-only git diff per service (files as a tree, side-by-side or unified, syntax coloured) to review what an AI agent wrote
-- Live colored logs (xterm.js), filter, 1k-10k lines per service (Settings → Logs, default 1k)
-- Logs also go to files (`~/.grid/logs`, can be turned off), at most 10 MB per service, so they survive a restart of the Grid
-- CPU and memory of each running service (its whole process tree), in the toolbar and over MCP
-- **Terminals** in the same window (``Ctrl+` ``): real shells (cmd, PowerShell, Git Bash, bash, zsh…) opened in the
-  selected service's folder, several at once (Windows 10 1809+ for the pseudo-console)
-- **Database** panel (optional module, `-tags db`): a small Oracle SQL client you can share with your AI agent over MCP (see below)
+- **Changes** view: read-only git diff per service to review what an AI agent wrote
+- Live colored logs (xterm.js), filter, also written to files under `~/.grid/logs`
+- CPU and memory of each running service (its whole process tree)
+- **Terminals** in the same window (``Ctrl+` ``): real shells opened in the selected service's folder
+- **Database** panel: a small Oracle / PostgreSQL SQL client you can share with your AI agent over MCP
 - `depends_on` + readiness (`port` or log regex) so things start in order
 - Restart policies (`on-failure`, `always`)
-- Clean process-tree kill: Windows Job Objects / Unix process groups — no orphan
-  `java`/`node` keeping your port busy
+- Clean process-tree kill, no orphan `java`/`node` keeping your port busy
 - Turkish Windows friendly: `encoding: cp1254` / auto-detect
-- CLI for scripts and AI agents: `grid logs api -n 100`, `restart api`
+- CLI and MCP server for scripts and AI agents
 - Listens on 127.0.0.1 only, with CSRF and DNS-rebinding protection
+- `grid update` fetches new versions from the distribution repo
 
 ## Quick start
 
+Needs Node.js 17 or newer.
+
 ```sh
-cp grid.example.yaml grid.yaml   # or start empty and add services in the UI
-go build -o grid .               # Windows: go build -o grid.exe .
-./grid -c grid.yaml              # opens http://localhost:7070
+cd node
+npm install
+npm run release                  # embeds web/dist, bundles into node/release/
+cd release
+node grid.bundle.cjs serve       # opens http://127.0.0.1:18900
 ```
 
-The default build has no Database panel. Add it with a build tag:
+`cp grid.example.yaml grid.yaml` gives a starting config, or start empty and add services in the UI.
+Config lookup: `--config=<file>`, else `./grid.yaml`, else the last workspace you opened (remembered in
+`~/.grid`, override the folder with `$GRID_HOME`). Switch workspaces from the name next to the logo.
+The default port is `18900` (`-p <port>` or `$GRID_PORT`).
 
-| tag | drivers | make |
-|---|---|---|
-| (none) | no Database panel | `make build` |
-| `-tags db` | Oracle and PostgreSQL | `make build DB=1` |
-| `-tags oracle` | Oracle only | `make build DB=oracle` |
-| `-tags postgres` | PostgreSQL only | `make build DB=postgres` |
-
-Leaving a driver out keeps it (and its network and crypto code) out of the binary entirely, which matters on locked-down
-machines where endpoint protection flags new executables. `go version -m grid` lists what went in.
-
-Grid remembers the workspaces you open in `~/.grid/state.json` (override with `$GRID_HOME`).
-Without `-c` it reopens the last one; switch workspaces from the name next to the logo.
-
-Prebuilt binaries (`grid.exe` for Windows x64, `grid-macos` for Apple silicon, `grid-linux` for Linux x86-64,
-`grid-db.exe` / `grid-db-macos` / `grid-db-linux` with the Database panel, and `SHA256SUMS.txt`) are on the
-[Releases](../../releases) page. The UI is prebuilt in `web/dist` and Go deps are vendored, so building only needs
-Go — no npm or internet access.
+The UI is prebuilt in `web/dist`; rebuild it with `cd web && npm install && npm run build` when you change it.
+The database drivers (`pg`, `oracledb`) are bundled as separate files in `release/drivers/` and loaded on first
+use. The only native part is `node-pty` (terminals), shipped in `release/node_modules`.
 
 Keyboard (Services): `j`/`k` move, `/` filter the log, `s` start or stop, `r` restart, `c` clear, `n` new,
 `e` edit, ``Ctrl+` `` terminals.
@@ -95,143 +82,99 @@ The commands are derived on every start, so they follow changes in `pom.xml`:
 | `jar` | — | `java <jvm_args> -jar <file> <args>` (an already built jar; `file` may use `*`, newest match wins) |
 | `custom` (default) | — | `command` as written |
 
-A Spring Boot build is **skipped when nothing changed**: Grid remembers when the last build started and
-compares it with the newest file under `src/`, the `pom.xml` files and `.mvn` (the jar's own date can't be used).
-Tick **Always rebuild** (`always_build: true`) to build on every start. By default tests are neither run nor
-compiled (`skip_tests`), which is the biggest saving on a slow machine.
+A Spring Boot build is **skipped when nothing changed**. Tick **Always rebuild** (`always_build: true`) to build on
+every start. By default tests are neither run nor compiled (`skip_tests`).
 
-While the build runs the service shows **building**; a failed build stops there (the app is
-not started), and Stop/Restart during a build cancel it. Right-click → **Run without build**
-starts the last build output. Crash restarts reuse the last build.
+While the build runs the service shows **building**; a failed build stops there, and Stop/Restart during a build
+cancel it. Right-click → **Run without build** starts the last build output.
 
-In the form, pick the working directory (type it or **Browse…**) and the project is detected:
-Spring Boot apps in single- or multi-module Maven builds (by `@SpringBootApplication`), the
-main class, `java.version` (matching Java runtime preselected), `server.port` (URL), profile
-files (`application-*.yml`), or `package.json` scripts, lock file and `engines.node`.
+In the form, pick the working directory (type it or **Browse…**) and the project is detected: Spring Boot apps in
+single- or multi-module Maven builds, the main class, `java.version` (matching Java runtime preselected),
+`server.port` (URL), profile files, or `package.json` scripts, lock file and `engines.node`.
 The generated build and run commands are previewed as you edit.
 
 ## For AI agents: `grid mcp`
 
-`grid mcp` is an MCP server (stdio) with these tools, so an agent can run the
-edit → restart → read logs loop without you copy-pasting:
+`grid mcp` is an MCP server (stdio), so an agent can run the edit → restart → read logs loop without you
+copy-pasting:
 
 | tool | what it does |
 |---|---|
-| `status` | services and their state (with CPU and memory while running) |
-| `logs` | last N log lines of a service (colors removed). Filters save tokens: `level` (error / warn), `grep` (regex), `since_restart`, `context` (lines after each match, for stack traces) |
-| `describe` | one service in full: folder, build and run command, URL, readiness, dependencies, runtimes, CPU / memory, log file |
+| `status` | services and their state |
+| `logs` | last N log lines of a service (colors removed). Filters save tokens: `level` (error / warn), `grep` (regex), `since_restart`, `context` |
+| `describe` | one service in full: folder, build and run command, URL, readiness, dependencies, runtimes |
 | `restart` | restart / start / stop, waits until it is running or failed, returns the last log lines |
 | `wait` | keep waiting for a service that `restart` reported as still building / starting |
+| `reload` | re-read `grid.yaml` and the saved database connections after a manual edit |
+| `service_add` / `service_edit` / `service_remove` | manage services in `grid.yaml` |
+| `runtimes`, `runtime_add` / `runtime_edit` / `runtime_remove` | list and manage runtimes |
+| `db_list`, `db_tables`, `db_describe`, `db_query`, `db_execute` | shared database connections (see below) |
 
-Slow machines (a VDI building with Maven) are handled so the agent never mistakes a long build for a
-failure: `restart` waits at most 40 s by default (`grid mcp --wait 60` to change it; keep it under the
-agent's tool timeout), then answers "STILL BUILDING ... not a failure, call `wait`" and the agent calls
-`wait` instead of restarting again. While waiting it also sends MCP progress notifications, so clients
-that reset their timeout on progress keep waiting. `status` shows how long a service has been building.
+Slow machines (a VDI building with Maven) are handled so the agent never mistakes a long build for a failure:
+`restart` waits at most 40 s by default (`grid mcp --wait 60` to change it), then answers "STILL BUILDING ... not a
+failure, call `wait`".
 
-The Grid itself must be running (`grid`). Register it in the agent's MCP config, for example
-(OpenCode style; the key names depend on the agent):
+The Grid itself must be running. Register it in the agent's MCP config, for example:
 
 ```json
-{ "mcp": { "grid": { "type": "local", "command": ["C:\\tools\\grid.exe", "mcp"], "enabled": true,
-                      "environment": { "GRID_PORT": "7070" } } } }
+{ "mcp": { "grid": { "type": "local", "command": ["node", "/path/to/grid.bundle.cjs", "mcp"], "enabled": true,
+                      "environment": { "GRID_PORT": "18900" } } } }
 ```
-
-Without MCP the same works through the CLI (`grid status`, `grid logs <svc> -n 100`, `grid restart <svc>`).
 
 ## Database panel
 
-Optional module: only in builds with `-tags db`, `-tags oracle` or `-tags postgres` (see Quick start;
-`grid-db.exe` on the Releases page has both drivers). Without it the panel and the `db_*` MCP tools are not there;
-with one driver the connection form only offers that database.
-
-A small SQL client for **Oracle** and **PostgreSQL** (pure Go drivers, go-ora and pgx: no client to install, one
-exe is enough). Oracle targets 19c (tried against 23ai); PostgreSQL 10 or newer (tried against 17). The automated
-tests use a fake driver.
-
-Open the **Database** panel (cylinder icon), add a connection (Oracle: host + port + service name, or SID, or a TNS
-descriptor / alias from `tnsnames.ora`; PostgreSQL: host + port + database and the SSL mode), test it, then browse schemas, tables and columns on the left and write SQL
-on the right:
+A small SQL client for **Oracle** (19c+, Thin mode, no client to install) and **PostgreSQL** (10+). Open the
+**Database** panel (cylinder icon), add a connection, test it, then browse schemas, tables and columns on the left
+and write SQL on the right:
 
 - **Run:** `Ctrl+Enter` runs the selection, or everything; `Ctrl+Shift+Enter` only the statement under the cursor.
   `Stop` cancels a running statement.
-- **Several statements** (separated by `;`) run one after the other, each result in its own tab, stopping at the
-  first error. Oracle: a PL/SQL block ends with a line holding only `/`. PostgreSQL: `;` inside `$$ … $$` bodies is
-  part of the body.
-- **Completion:** tables, views, schemas and columns from the database as you type (`FROM emp…`, `e.` after an alias).
-- **Results:** a scrolling grid you can copy or download as CSV, paged with Prev / Next. The row limit
-  (10–1000) is next to **Run**.
-
-- **Commit and rollback:** by default changes wait for **Commit** / **Rollback** (a yellow bar reminds you).
-  Tick "Commit every statement automatically" on the connection if you prefer that.
+- **Several statements** (separated by `;`) run one after the other, each result in its own tab. Oracle: a PL/SQL
+  block ends with a line holding only `/`.
+- **Completion:** tables, views, schemas and columns from the database as you type.
+- **Results:** a scrolling grid you can copy or download as CSV, paged with Prev / Next.
+- **Commit and rollback:** by default changes wait for **Commit** / **Rollback**; the connection can commit every
+  statement automatically instead.
 - **Where connections live:** `~/.grid/connections.json`, per user, not in `grid.yaml`. Passwords are stored as
-  plain text there (the file is readable by your user only).
-- **PostgreSQL specifics:** DDL is transactional, so it waits for Commit like DML does. `BEGIN` / `END` typed in
-  the editor work too. A failed statement only undoes itself: each one runs behind a savepoint, so the transaction
-  is not left aborted. `VACUUM`, `CREATE DATABASE` and the like run outside the transaction.
+  plain text there.
 
 ### Sharing a database with AI (MCP)
 
 Each connection has an **AI access (MCP)** setting: *Read-only* (default), *Read and write*, or *Not shared*.
-`grid mcp` then offers these tools for the shared connections:
-
-| tool | what it does |
-|---|---|
-| `db_list` | the shared connections and whether the AI may change data |
-| `db_tables` | find tables and views (name fragment, schema or `*` for all) |
-| `db_describe` | columns, primary / unique / foreign keys, indexes, comments of one table |
-| `db_query` | one `SELECT` / `WITH`, result as small plain text (row and size limits) |
-| `db_execute` | `INSERT` / `UPDATE` / `DELETE` / DDL, committed on success; only on *Read and write* connections |
-
-Read-only is enforced by the Grid, not by trusting the agent: the statement must be a single `SELECT` / `WITH`
-without `FOR UPDATE`, it runs inside `SET TRANSACTION READ ONLY` and is always rolled back, and anything else is
-refused before it reaches the database. A separate read-only database user is still the strongest protection.
-Everything the AI reads goes to your model provider; there is no masking, so share only what you may.
+Read-only is enforced by the Grid: the statement must be a single `SELECT` / `WITH` without `FOR UPDATE`, it runs in
+a read-only transaction that is always rolled back, and anything else is refused. A separate read-only database user
+is still the strongest protection. Everything the AI reads goes to your model provider; there is no masking.
 
 ## Log files
 
-Besides the history in memory, every line a service logs is appended (colours removed, with time and stream) to
-`~/.grid/logs/<workspace>-<hash>/<service>.log` (`$GRID_HOME/logs` when that is set). It is on by default;
-turn it off with **Save logs to files** in Settings → Logs (saved in `~/.grid`). The folder is shown there, and
-`describe` over MCP gives the file of a service. Each service takes at most **10 MB**: when
-`<service>.log` reaches 5 MB it becomes `<service>.log.1` (replacing the older one) and a new file starts. Clearing
-the log in the UI does not touch the files. Idle files are closed after 30 s, so they can be opened or deleted at any time.
-
-## CPU and memory
-
-While a service (or its build) runs, the toolbar shows the CPU (one core = 100%) and resident memory of its
-whole process tree, e.g. `mvn` → `java`, sampled every 2 seconds. On Windows the numbers come from the service's
-Job Object, on Linux from `/proc`, on macOS from `ps`. `status` and `describe` over MCP show them too.
+Every line a service logs is appended (colours removed, with time and stream) to
+`~/.grid/logs/<workspace>-<hash>/<service>.log`. Turn it off with **Save logs to files** in Settings → Logs.
+Each service takes at most **10 MB** (`<service>.log` rotates to `<service>.log.1` at 5 MB). Clearing the log in the
+UI does not touch the files.
 
 ## Adding and editing services in the UI
 
-**New** (sidebar, or `N`), the **+** on a group header, **✎** on a row, right-click → **Edit**,
-or **Edit** in the toolbar (`E`) open the form. Saving writes `grid.yaml` directly:
+**New** (sidebar, or `N`), the **+** on a group header, **✎** on a row, right-click → **Edit**, or **Edit** in the
+toolbar (`E`) open the form. Saving writes `grid.yaml` directly:
 
 - the file is edited as a YAML tree, so comments and keys the form doesn't know are kept
-- the result is validated before it replaces the file; an invalid change is rejected and
-  the file is left untouched; the previous version is kept as `grid.yaml.bak`
-- editing a running service applies on its next start (**Save & restart** does both);
-  renaming requires the service to be stopped, and `depends_on` references follow the rename
+- the result is validated before it replaces the file; the previous version is kept as `grid.yaml.bak`
+- editing a running service applies on its next start (**Save & restart** does both)
 - deleting a running service stops it first; a service others depend on can't be deleted
-
-Deep links: `http://localhost:7070/#new`, `#new=<group>`, `#new-dir=<folder>`, `#edit=<service>`,
-`#runtimes`, `#runtime=<name>`.
 
 ## CLI
 
 ```
-grid [serve] [-c file] [-p 7070] [--no-browser]
-grid status [--json]
-grid start|stop|restart|clear <service|group|all>
-grid logs <service> [-n 200] [-f] [--raw]
-grid reload
-grid runtimes              # check every runtime path and print its real version
-grid mcp [-p 7070] [--wait 40]   # MCP server for AI agents (see above)
+grid [serve] [--config=file] [-p 18900] [--no-browser]
+grid status
+grid start|stop|restart <service|all>
+grid logs <service> [n]
+grid mcp [-p 18900] [--wait 40]    # MCP server for AI agents
+grid update [--check] [--force]
+grid version
 ```
 
-For the fans: `grid programs` = status, `grid rez <x>` = start, `grid derezz <x>` = stop,
-`grid eol` ("end of line") stops everything. `GRID_PORT` overrides the port.
+Run it as `node grid.bundle.cjs <command>`. `GRID_PORT` overrides the port.
 
 ## Config
 
@@ -240,7 +183,6 @@ See [`grid.example.yaml`](grid.example.yaml) for every option.
 | key | meaning |
 |---|---|
 | `type` | `spring-boot`, `node`, `script`, `jar` or `custom` (default); see *Service types* |
-| `spring` / `node` / `script` / `jar` | options of the typed service (module, profiles, jvm_args, args, mode, skip_tests, always_build, offline / script, args, install, package_manager / file, args / file, jvm_args, args) |
 | `command` | command line for `custom` services, run through `shell` |
 | `shell` | Windows: `cmd` (default), `powershell`, `pwsh` or a bash path; Unix: `/bin/sh` |
 | `cwd` | working directory, relative to the config file |
@@ -249,9 +191,8 @@ See [`grid.example.yaml`](grid.example.yaml) for every option.
 | `depends_on` | services that must be ready first |
 | `ready` | `{ port: 8080 }` or `{ log: "Started .* in" }`, optional `timeout` |
 | `restart`, `max_restarts` | `no` / `on-failure` / `always` |
-| `autostart` | start when the runner starts |
-| `changes` | `false` keeps this service's project out of the **Changes** view (form: *Show this project in Changes*). Services sharing a working directory are one project, so `false` on any of them hides it |
-| `changes_ignore` | paths left out of the **Changes** view without touching git (tracked files too), relative to `cwd`: `*.iml` (any depth), `tmp/` (a folder), `src/app-local.yml`, `**/gen/*.java`. Right-click a file or folder in Changes → *Hide from Changes* adds one; the header shows how many are hidden and can show them dimmed |
+| `autostart` | start when the Grid starts |
+| `changes`, `changes_ignore` | keep a project, or paths in it, out of the **Changes** view |
 | `encoding` | `auto` (default), `utf-8`, `cp1254` |
 | `url` | link shown in the UI |
 | `stop_timeout` | grace period before kill (Unix), default `10s` |
@@ -264,7 +205,7 @@ See [`grid.example.yaml`](grid.example.yaml) for every option.
 runtimes:
   java-11:   { home: "C:/Program Files/Java/jdk-11.0.24" }
   java-17:   { home: "C:/Program Files/Java/jdk-17.0.21.0.2" }
-  maven-3.9: { home: "C:/Program Files/JetBrains/IntelliJ IDEA 2025.3.3/plugins/maven/lib/maven3" }
+  maven-3.9: { home: "C:/tools/maven3" }
   node-20:   { home: "C:/tools/node-v20.18.0-win-x64" }
 
 services:
@@ -273,34 +214,26 @@ services:
   web-ui: { command: "npm run dev", runtime: node-20 }
 ```
 
-Without `runtime:` a service uses whatever is on the system PATH. With it, the runtime's
-bin dir is put first on PATH. There are three types:
+Without `runtime:` a service uses whatever is on the system PATH. With it, the runtime's bin dir is put first on PATH.
 
 | type | what it does |
 |---|---|
 | `java` | sets `JAVA_HOME` and puts `bin` first on PATH, so `java` and `mvn` use this JDK |
-| `node` | puts the Node folder first on PATH (`node`, `npm`, `npx`); the plain Windows zip works |
-| `script` | any tool folder (Maven, Gradle, Python, own scripts): its `bin` (or the folder itself) goes first on PATH |
+| `node` | puts the Node folder first on PATH (`node`, `npm`, `npx`) |
+| `script` | any tool folder (Maven, Gradle, Python…): its `bin` (or the folder itself) goes first on PATH |
 
-The type is inferred from the name (`java-*`, `jdk*`, `jre*` → java, `node*` → node,
-anything else → script) or set with `type:`. A service may use at most one java and one node runtime
-but any number of script runtimes. A runtime may carry its own `env` (e.g. `MAVEN_OPTS`).
-`grid runtimes` checks every path and prints the real version; a missing path
-makes the service fail with a clear message.
-
-Runtimes can also be managed in the UI: the **Runtimes** list at the bottom of the
-sidebar (or **+ New runtime** in the service form) opens a form that checks the folder
-while you type and shows the real `java -version` / `node --version`. A runtime that a
-service still uses cannot be deleted; renaming one updates the services that use it.
+The type is inferred from the name (`java-*`, `jdk*`, `jre*` → java, `node*` → node, anything else → script) or set
+with `type:`. A service may use at most one java and one node runtime but any number of script runtimes. Runtimes can
+also be managed in the UI (the **Runtimes** list at the bottom of the sidebar), which shows the real
+`java -version` / `node --version` while you type.
 
 ## Development
 
 ```sh
-make dev     # Go API on :7070 + Vite with hot reload on :5173
-make build   # local binary in bin/ (build web/dist first when the UI changed)
-make web     # rebuild web/dist (commit it)
-make vendor  # after changing Go deps (commit vendor/)
-make windows # cross-compile bin/grid.exe
-make linux   # cross-compile bin/grid-linux
-make test     # Go tests of both builds (the Database tests use a fake driver, no Oracle needed)
+cd web && npm install && npm run build    # rebuild web/dist (commit it)
+cd node && npm install
+npm test                                  # Node tests
+npm run build                             # bundle into node/dist/
+npm run release                           # same, and copy to node/release/
+npm run dist -- <dist repo folder>        # release + files and manifest.next.json for the distribution repo
 ```
