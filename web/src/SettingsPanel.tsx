@@ -59,7 +59,7 @@ export function SettingsPanel({ state, setState, setError, theme, setTheme, neon
           <div className="theme-cards">
             {(
               [
-                ['grid', 'The Grid', 'Cyan light lines on black, neon.'],
+                ['grid', 'The Grid', 'Electric blue on black, glow.'],
                 ['basic', 'Basic', 'Calm neutral greys, no glow.'],
               ] as [Theme, string, string][]
             ).map(([id, label, help]) => (

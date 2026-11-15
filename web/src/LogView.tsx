@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { Entry, LogStore } from './api'
-import { sysColor, termTheme, type Theme } from './theme'
+import { MONO, sysColor, termTheme, type Theme } from './theme'
 
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g
 
@@ -70,7 +70,7 @@ function createPane(host: HTMLDivElement, theme: Theme, scrollback: number): Pan
     cursorStyle: 'bar',
     cursorInactiveStyle: 'none',
     scrollback,
-    fontFamily: 'JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace',
+    fontFamily: MONO,
     fontSize: 15,
     lineHeight: 1.2,
     theme: termTheme[theme],

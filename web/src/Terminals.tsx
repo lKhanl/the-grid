@@ -4,15 +4,15 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { listShells, termSocketURL, type ShellInfo, type State, type TermInfo } from './api'
 import { ChevronDownIcon, CloseIcon, MaximizeIcon, PanelHideIcon, PlusIcon, RestoreIcon, TerminalIcon } from './icons'
-import { termTheme, type Theme } from './theme'
+import { MONO, termTheme, type Theme } from './theme'
 
-const FONT = 'JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace'
+const FONT = MONO
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform)
 
 /** The log theme hides the cursor; a shell needs one. */
 function shellTheme(theme: Theme) {
   const base = termTheme[theme]
-  return { ...base, cursor: theme === 'grid' ? '#5ef2ff' : '#bcbec4', cursorAccent: base.background }
+  return { ...base, cursor: theme === 'grid' ? '#3d8bff' : '#bcbec4', cursorAccent: base.background }
 }
 
 export function shellName(path: string) {
