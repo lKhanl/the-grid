@@ -63,7 +63,7 @@ The default port is `18900` (`-p <port>` or `$GRID_PORT`).
 
 The UI is prebuilt in `web/dist`; rebuild it with `cd web && npm install && npm run build` when you change it.
 The database drivers (`pg`, `oracledb`) are bundled as separate files in `release/drivers/` and loaded on first
-use. The only native part is `node-pty` (terminals), shipped in `release/node_modules`.
+use. The only native part is `node-pty` (terminals); `npm run release` copies it into `release/node_modules`.
 
 Keyboard (Services): `j`/`k` move, `/` filter the log, `s` start or stop, `r` restart, `c` clear, `n` new,
 `e` edit, ``Ctrl+` `` terminals.

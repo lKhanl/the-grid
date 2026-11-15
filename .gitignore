@@ -11,3 +11,6 @@ web/node_modules/
 target/
 demo/**/node_modules/
 demo/web-ui/package-lock.json
+
+# build output (npm run release in node/)
+/node/release/

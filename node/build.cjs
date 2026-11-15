@@ -7,7 +7,7 @@
 // The version (node/package.json, the only place it lives) is embedded into the bundle (src/version.cjs).
 // `dist <folder>` runs `release`, then copies release/ (without the demo grid.yaml) into a clone of the distribution repo and writes
 // manifest.next.json there (see publish()); the installer and `grid update` read that repo.
-// `release` also copies the result to release/ (what the VDI runs) and fails when release/ holds a native binary other than
+// `release` also copies the result (and node-pty) to release/ (what the VDI runs; not in git, built with `npm run release`) and fails when release/ holds a native binary other than
 // node-pty's two ConPTY files.
 const fs = require('fs'), path = require('path'), crypto = require('crypto')
 const esbuild = require('esbuild')
@@ -75,6 +75,18 @@ then, once both pushes are done:
 (clients read manifest.json from master: it must only point to a tag that is already pushed)`)
 }
 
+// node-pty is a native module that stays outside the bundle: copy only what the Grid needs (its JS, package.json, licence and the
+// two Windows ConPTY binaries) from node_modules into release/node_modules/node-pty
+function copyPty() {
+  const from = path.join('node_modules', 'node-pty'), to = path.join('release', 'node_modules', 'node-pty')
+  if (!fs.existsSync(from)) throw new Error('node-pty is not installed: run "npm install" first')
+  fs.rmSync(to, { recursive: true, force: true })
+  const keep = f => { const r = path.relative(from, f).split(path.sep).join('/'); return r === 'package.json' || r === 'LICENSE' || (r.startsWith('lib/') && /\.js$/.test(r) && !/\.test\.js$/.test(r)) || /^prebuilds\/win32-x64\/conpty(_console_list)?\.node$/.test(r) }
+  for (const f of files(from).filter(keep)) {
+    const t = path.join(to, path.relative(from, f)); fs.mkdirSync(path.dirname(t), { recursive: true }); fs.copyFileSync(f, t)
+  }
+}
+
 async function main() {
   const dist = mode === 'dist' ? path.resolve(callerCwd, distArg || '') : null
   if (mode === 'dist') {
@@ -102,6 +114,7 @@ async function main() {
     fs.rmSync('release/drivers', { recursive: true, force: true })
     fs.mkdirSync('release/drivers', { recursive: true })
     for (const f of out) fs.copyFileSync(f, f.replace(/^dist/, 'release'))
+    copyPty()
     const allowed = ['conpty.node', 'conpty_console_list.node']
     const bad = files('release').filter(f => /\.(node|exe|dll|dylib|so)$/i.test(f) && !allowed.includes(path.basename(f)))
     if (bad.length) throw new Error('release/ must not hold native binaries:\n' + bad.join('\n'))
