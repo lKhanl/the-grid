@@ -120,11 +120,11 @@ function createStats(ctx) {
     for (const s of Object.values(ctx.svcs())) {
       const p = s.proc; if (!p) continue
       const u = treeUsage(table, p.pid); if (!u) continue
-      const st = s.stats || (s.stats = { proc: null, at: 0, used: 0, cpu: 0, cpuOK: false, mem: 0 }), before = { ...st }
+      const st = s.stats || (s.stats = { proc: null, at: 0, used: 0, cpu: 0, cpuOK: false, mem: 0 })
       if (st.proc === p && now > st.at) { st.cpu = Math.round(Math.max(0, u.cpu - st.used) / (now - st.at) * 1000) / 10; st.cpuOK = true } // a child exited: its CPU time left the sum
       else st.cpuOK = false
       st.proc = p; st.at = now; st.used = u.cpu; st.mem = u.mem
-      if (st.cpuOK !== before.cpuOK || Math.abs(st.cpu - before.cpu) >= 1 || Math.abs(st.mem - before.mem) > Math.max(before.mem / 50, 1 << 20) || before.proc !== p) ctx.publish(s)
+      ctx.publish(s) // every sample, even an unchanged one: the UI draws its sparkline from these events and needs two points for a steady service
     }
   }
   const running = () => Object.values(ctx.svcs()).some(s => s.proc)
