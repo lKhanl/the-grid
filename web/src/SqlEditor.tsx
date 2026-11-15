@@ -46,7 +46,7 @@ const theme = EditorView.theme(
   {
     '&': { height: '100%', backgroundColor: 'var(--bg)', color: 'var(--text)', fontSize: '13px' },
     '&.cm-focused': { outline: 'none' },
-    '.cm-scroller': { fontFamily: "'JetBrains Mono', Consolas, Menlo, monospace", lineHeight: '1.8', overflow: 'auto' },
+    '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.8', overflow: 'auto' },
     '.cm-content': { caretColor: 'var(--text)', padding: '10px 0' },
     '.cm-line': { padding: '0 14px 0 6px' },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text)' },
@@ -58,7 +58,7 @@ const theme = EditorView.theme(
     '.cm-matchingBracket': { backgroundColor: 'var(--on)', outline: '1px solid var(--accent)' },
     '.cm-placeholder': { color: 'var(--muted)' },
     '.cm-tooltip': { backgroundColor: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: '6px', overflow: 'hidden' },
-    '.cm-tooltip-autocomplete > ul': { fontFamily: "'JetBrains Mono', Consolas, Menlo, monospace", fontSize: '12.5px', maxHeight: '260px' },
+    '.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--font-mono)', fontSize: '12.5px', maxHeight: '260px' },
     '.cm-tooltip-autocomplete > ul > li': { padding: '2px 8px' },
     '.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: 'var(--sel)', color: 'var(--text)' },
     '.cm-completionDetail': { color: 'var(--muted)', marginLeft: '12px', fontStyle: 'normal' },
