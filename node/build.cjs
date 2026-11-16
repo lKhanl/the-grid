@@ -30,10 +30,10 @@ function releaseFiles() {
 }
 
 // Copies release/ into the dist repo folder (files that are no longer in release/ are deleted; .git, manifest.json,
-// the-grid-node-installer.cjs, README*, .gitignore and .gitattributes stay) and writes manifest.next.json. manifest.json is NOT
+// the-grid-node-installer.cjs, README*, .gitignore, .gitattributes and *.bat stay) and writes manifest.next.json. manifest.json is NOT
 // touched: it must be committed last (clients read it from master and then fetch the files by tag), so the order is printed.
 function publish(dist) {
-  const keep = n => n === '.git' || n === 'manifest.json' || n === 'manifest.next.json' || n === 'the-grid-node-installer.cjs' || n === '.gitignore' || n === '.gitattributes' || /^README/i.test(n)
+  const keep = n => n === '.git' || n === 'manifest.json' || n === 'manifest.next.json' || n === 'the-grid-node-installer.cjs' || n === '.gitignore' || n === '.gitattributes' || /^README/i.test(n) || /\.bat$/i.test(n)
   const list = releaseFiles(), want = new Set(list)
   const removed = []
   const sweep = (dir, rel) => {
