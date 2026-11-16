@@ -80,8 +80,13 @@ async function base(root) {
 
 // Every changed file (staged, unstaged, untracked) against HEAD. Untracked files come without line count (see countUntracked).
 async function status(root) {
-  const res = { branch: await branch(root), files: [] }
-  const out = text(await git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']))
+  // branch, status and numstat do not depend on each other: start them together (a git start costs seconds on a slow disk)
+  const [br, out, nums] = await Promise.all([
+    branch(root),
+    git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']).then(text),
+    base(root).then(b => git(root, ['diff', b, '--numstat', '-z', '--no-renames'])).then(text).catch(() => ''),
+  ])
+  const res = { branch: br, files: [] }
   const byPath = new Map()
   for (const rec of out.split('\0')) {
     if (rec.length < 4) continue
@@ -93,16 +98,13 @@ async function status(root) {
     else f.status = 'M'
     byPath.set(p, f)
   }
-  try {
-    const nums = text(await git(root, ['diff', await base(root), '--numstat', '-z', '--no-renames']))
-    for (const rec of nums.split('\0')) {
-      const parts = rec.split('\t'); if (parts.length < 3) continue
-      const f = byPath.get(parts.slice(2).join('\t'))
-      if (!f) continue
-      if (parts[0] === '-') { f.binary = true; continue }
-      f.additions = parseInt(parts[0], 10) || 0; f.deletions = parseInt(parts[1], 10) || 0
-    }
-  } catch {}
+  for (const rec of nums.split('\0')) {
+    const parts = rec.split('\t'); if (parts.length < 3) continue
+    const f = byPath.get(parts.slice(2).join('\t'))
+    if (!f) continue
+    if (parts[0] === '-') { f.binary = true; continue }
+    f.additions = parseInt(parts[0], 10) || 0; f.deletions = parseInt(parts[1], 10) || 0
+  }
   res.files = [...byPath.values()].sort(byPathAsc)
   return res
 }
@@ -309,10 +311,15 @@ function createGit(ctx) {
     const byRoot = new Map()
     for (const p of byKey.values()) { if (!byRoot.has(p.root)) byRoot.set(p.root, []); byRoot.get(p.root).push(p) }
     const out = []
-    for (const [root, plist] of byRoot) {
-      if (!visible.has(root)) continue // every service of this repository is hidden: not even its other files are listed
+    const trace = process.env.GRID_GIT_TRACE
+    // repositories are independent: ask them all at once (each one costs a few slow git starts on a VDI)
+    const results = await Promise.all([...byRoot].map(async ([root, plist]) => {
+      if (!visible.has(root)) return null // every service of this repository is hidden: not even its other files are listed
+      const t0 = Date.now()
       let st
-      try { st = await status(root) } catch (e) { return { projects: [], error: e.message } }
+      try { st = await status(root) } catch (e) { return { error: e.message } }
+      const t1 = Date.now()
+      const mine = []
       plist.sort((a, b) => b.prefix.length - a.prefix.length) // deepest folder first
       const rootProject = plist.find(p => p.prefix === '')
       const add = (p, f) => {
@@ -329,14 +336,18 @@ function createGit(ctx) {
         if (p.files.length + p.ignored.length === 0 || p.hidden) continue // a hidden project still claims its files
         p.branch = st.branch
         await finish(p)
-        out.push(p)
+        mine.push(p)
       }
       if (other.length) {
         const o = { key: root + '|*', name: path.basename(root) + ' (other files)', services: [], types: [], root, prefix: '', branch: st.branch, files: other, ignored: [] }
         await finish(o)
-        out.push(o)
+        mine.push(o)
       }
-    }
+      if (trace) console.log(`[git] ${root}: status ${t1 - t0} ms, counting ${Date.now() - t1} ms, ${st.files.length} changes`)
+      return { projects: mine }
+    }))
+    for (const r of results) { if (r && r.error) return { projects: [], error: r.error } }
+    for (const r of results) if (r) out.push(...r.projects)
     out.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
     // same field order as the Go JSON; the working fields (hidden, patterns, ignore) stay out
     return {
