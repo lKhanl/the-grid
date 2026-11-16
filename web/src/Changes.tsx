@@ -457,7 +457,7 @@ const MAX_SHOWN = 1500
 
 export type DiffMode = 'split' | 'unified'
 
-export function DiffPane({ git, onOpenFile }: { git: GitState; onOpenFile?: (repo: string, path: string) => boolean }) {
+export function DiffPane({ git }: { git: GitState }) {
   const [mode, setMode] = useState<DiffMode>(() => (localStorage.getItem('grid.git.mode') === 'unified' ? 'unified' : 'split'))
   const [diff, setDiff] = useState<GitDiff | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -533,11 +533,6 @@ export function DiffPane({ git, onOpenFile }: { git: GitState; onOpenFile?: (rep
           <span className="muted">No file selected</span>
         )}
         <div className="spacer" />
-        {onOpenFile && repo && file && info?.status !== 'D' && (
-          <button className="btn text small" title="Open the whole file in the read-only Files view" onClick={() => onOpenFile(repo, file)}>
-            Open file
-          </button>
-        )}
         {zoom.controls}
         <div className="seg" role="group" aria-label="Diff view">
           <button className={mode === 'split' ? 'on' : ''} onClick={() => setMode('split')}>

@@ -98,19 +98,6 @@ export default function App() {
   }
   const git = useGit(panel === 'changes')
   const files = useFiles(panel === 'files')
-  // "Open the whole file" from Changes: the git repository may be above the service folder, so find the folder the file lives in
-  const openInFiles = useCallback(
-    (repo: string, path: string) => {
-      const norm = (x: string) => x.replace(/\\/g, '/').replace(/\/$/, '')
-      const abs = norm(repo) + '/' + path
-      const r = files.roots.filter((x) => abs.startsWith(norm(x.root) + '/')).sort((a, b) => b.root.length - a.root.length)[0]
-      if (!r) return false
-      files.setSel({ root: r.root, path: abs.slice(norm(r.root).length + 1) })
-      setPanel('files')
-      return true
-    },
-    [files.roots, files.setSel], // eslint-disable-line react-hooks/exhaustive-deps
-  )
   // The Database panel exists only in builds with -tags db.
   const hasDb = state?.features?.includes('db') ?? false
   // the database drivers compiled in (db:oracle, db:postgres)
@@ -386,7 +373,7 @@ export default function App() {
         />
         <section className={`detail ${term.termOpen ? 'term-open' : ''}`}>
           {panel === 'files' && !(term.termOpen && term.termMax) && <FileViewer files={files} />}
-          {panel === 'changes' && !(term.termOpen && term.termMax) && <DiffPane git={git} onOpenFile={openInFiles} />}
+          {panel === 'changes' && !(term.termOpen && term.termMax) && <DiffPane git={git} />}
           {panel === 'database' && !(term.termOpen && term.termMax) && <DbWorkbench dbs={dbs} />}
           <div
             className="detail-pane"
