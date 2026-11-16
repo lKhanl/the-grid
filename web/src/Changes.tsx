@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { isYaml, langOf, tokenize, tokenizeMarkup, tokenizeYaml, type Tok } from './highlight'
 import { changesIgnore, gitChanges, gitDiff, type GitDiff, type GitFile, type GitProject } from './api'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
+import { useZoom } from './zoom'
 import { ChevronIcon, FolderIcon, RefreshIcon } from './icons'
 
 // ---- state shared by the sidebar tree and the diff pane ----
@@ -456,11 +457,13 @@ const MAX_SHOWN = 1500
 
 export type DiffMode = 'split' | 'unified'
 
-export function DiffPane({ git }: { git: GitState }) {
+export function DiffPane({ git, onOpenFile }: { git: GitState; onOpenFile?: (repo: string, path: string) => boolean }) {
   const [mode, setMode] = useState<DiffMode>(() => (localStorage.getItem('grid.git.mode') === 'unified' ? 'unified' : 'split'))
   const [diff, setDiff] = useState<GitDiff | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loadingDiff, setLoadingDiff] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const zoom = useZoom(bodyRef)
   const [shown, setShown] = useState(MAX_SHOWN) // lines drawn: thousands of table rows are slow on a VDI
   const repo = git.sel?.root ?? null
   const file = git.sel?.path ?? null
@@ -530,6 +533,12 @@ export function DiffPane({ git }: { git: GitState }) {
           <span className="muted">No file selected</span>
         )}
         <div className="spacer" />
+        {onOpenFile && repo && file && info?.status !== 'D' && (
+          <button className="btn text small" title="Open the whole file in the read-only Files view" onClick={() => onOpenFile(repo, file)}>
+            Open file
+          </button>
+        )}
+        {zoom.controls}
         <div className="seg" role="group" aria-label="Diff view">
           <button className={mode === 'split' ? 'on' : ''} onClick={() => setMode('split')}>
             Side by side
@@ -539,7 +548,7 @@ export function DiffPane({ git }: { git: GitState }) {
           </button>
         </div>
       </div>
-      <div className="diff-body">
+      <div className="diff-body" ref={bodyRef} style={zoom.style}>
         {err && <div className="diff-note">{err}</div>}
         {!err && file && loadingDiff && <div className="diff-note">Loading…</div>}
         {!err && !file && <div className="diff-note">{git.error ?? 'Pick a changed file on the left.'}</div>}

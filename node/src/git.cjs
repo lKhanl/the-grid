@@ -372,4 +372,4 @@ function createGit(ctx) {
   return { handle, projects }
 }
 
-module.exports = { createGit, newIgnore, ignoreMatch }
+module.exports = { createGit, newIgnore, ignoreMatch, git }

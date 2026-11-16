@@ -29,3 +29,22 @@ export const sysColor = { grid: 75, basic: 246, 'basic-light': 242 }
 
 /** monospace stack for xterm (canvas: needs real family names, not a CSS variable) */
 export const MONO = "'JetBrains Mono Variable', 'JetBrains Mono', 'Cascadia Mono', Consolas, Menlo, monospace"
+
+// Text size of the whole app: "standard" (the default) or "large". Every font-size in styles.css is multiplied by --ui-scale;
+// xterm (canvas) and CodeMirror read the same factor.
+export type FontSize = 'standard' | 'large'
+export const FONT_SCALE: Record<FontSize, number> = { standard: 1, large: 1.15 }
+export const FONT_EVENT = 'grid:fontsize'
+
+export function loadFontSize(): FontSize {
+  return localStorage.getItem('grid.fontSize') === 'large' ? 'large' : 'standard'
+}
+
+export function applyFontSize(f: FontSize) {
+  document.documentElement.style.setProperty('--ui-scale', String(FONT_SCALE[f]))
+  localStorage.setItem('grid.fontSize', f)
+  window.dispatchEvent(new Event(FONT_EVENT))
+}
+
+/** the current factor, for the terminals (their font size is a number, not CSS) */
+export const fontScale = () => FONT_SCALE[loadFontSize()]

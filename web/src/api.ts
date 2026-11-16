@@ -510,3 +510,38 @@ export async function openWorkspace(path: string): Promise<State> {
 export async function forgetWorkspace(path: string) {
   await check(await fetch(`/api/workspaces?path=${encodeURIComponent(path)}`, { method: 'DELETE', headers: HEADERS }))
 }
+
+// ---- files (read-only browsing of the services' folders) ----
+export interface FileRoot {
+  root: string // absolute folder (one per distinct service cwd)
+  name: string
+  services: string[]
+  types: string[]
+}
+export interface FileEntry {
+  name: string
+  dir: boolean
+  ignored?: boolean // git-ignored (only listed when asked for)
+}
+export interface FileContent {
+  content: string
+  size: number
+  mtime: number
+  binary?: boolean
+  truncated?: boolean
+}
+
+const filesQuery = (o: Record<string, string>) => new URLSearchParams(o).toString()
+
+export async function fileRoots(): Promise<FileRoot[]> {
+  return (await (await check(await fetch('/api/files/roots'))).json()).roots
+}
+export async function fileTree(root: string, dir: string, ignored: boolean, fresh = false): Promise<{ entries: FileEntry[]; truncated: boolean }> {
+  return (await check(await fetch(`/api/files/tree?${filesQuery({ root, dir, ...(ignored ? { ignored: '1' } : {}), ...(fresh ? { fresh: '1' } : {}) })}`))).json()
+}
+export async function fileList(root: string, fresh = false): Promise<{ files: string[]; truncated: boolean }> {
+  return (await check(await fetch(`/api/files/list?${filesQuery({ root, ...(fresh ? { fresh: '1' } : {}) })}`))).json()
+}
+export async function fileRead(root: string, path: string, signal?: AbortSignal): Promise<FileContent> {
+  return (await check(await fetch(`/api/files/read?${filesQuery({ root, path })}`, { signal }))).json()
+}

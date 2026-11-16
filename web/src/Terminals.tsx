@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { listShells, termSocketURL, type ShellInfo, type State, type TermInfo } from './api'
 import { ChevronDownIcon, CloseIcon, MaximizeIcon, PanelHideIcon, PlusIcon, RestoreIcon, TerminalIcon } from './icons'
-import { MONO, termTheme, type Theme } from './theme'
+import { FONT_EVENT, fontScale, MONO, termTheme, type Theme } from './theme'
 
 const FONT = MONO
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform)
@@ -329,7 +329,7 @@ function TermScreen({ id, shown, theme }: { id: string; shown: boolean; theme: T
       cursorBlink: true,
       scrollback: 10000,
       fontFamily: FONT,
-      fontSize: 14,
+      fontSize: 14 * fontScale(),
       lineHeight: 1.15,
       macOptionIsMeta: true,
       theme: shellTheme(theme),
@@ -421,6 +421,21 @@ function TermScreen({ id, shown, theme }: { id: string; shown: boolean; theme: T
   useEffect(() => {
     if (term.current) term.current.options.theme = shellTheme(theme)
   }, [theme])
+
+  // the app text size changed (Settings)
+  useEffect(() => {
+    const on = () => {
+      if (!term.current) return
+      term.current.options.fontSize = 14 * fontScale()
+      try {
+        fit.current?.fit()
+      } catch {
+        /* hidden */
+      }
+    }
+    window.addEventListener(FONT_EVENT, on)
+    return () => window.removeEventListener(FONT_EVENT, on)
+  }, [])
 
   useEffect(() => {
     if (!shown) return

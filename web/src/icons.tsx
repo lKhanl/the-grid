@@ -301,3 +301,11 @@ export const DatabaseIcon = ({ size }: P) => (
     <path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />
   </Svg>
 )
+
+export const FilesIcon = ({ size }: P) => (
+  <Svg size={size}>
+    <path d="M14 3H7.5A1.5 1.5 0 0 0 6 4.5v15A1.5 1.5 0 0 0 7.5 21h9a1.5 1.5 0 0 0 1.5-1.5V7z" />
+    <path d="M14 3v4h4" />
+    <path d="M3 8v11.5A1.5 1.5 0 0 0 4.5 21" />
+  </Svg>
+)

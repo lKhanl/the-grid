@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { Entry, LogStore } from './api'
-import { MONO, sysColor, termTheme, type Theme } from './theme'
+import { FONT_EVENT, fontScale, MONO, sysColor, termTheme, type Theme } from './theme'
 
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g
 
@@ -60,6 +60,8 @@ function rewrite(p: Pane, service: string, store: LogStore, filter: string, them
   if (lines.length) p.term.write(lines.join('\n') + '\n')
 }
 
+const BASE_FONT = 15
+
 function createPane(host: HTMLDivElement, theme: Theme, scrollback: number): Pane {
   const el = document.createElement('div')
   el.className = 'log-pane'
@@ -71,7 +73,7 @@ function createPane(host: HTMLDivElement, theme: Theme, scrollback: number): Pan
     cursorInactiveStyle: 'none',
     scrollback,
     fontFamily: MONO,
-    fontSize: 15,
+    fontSize: BASE_FONT * fontScale(),
     lineHeight: 1.2,
     theme: termTheme[theme],
   })
@@ -164,6 +166,17 @@ export function LogView({ service, store, filter: rawFilter, theme, maxLines, kn
       }
     })
   }, [known])
+
+  // the app text size changed (Settings): every pane gets the new font size and is fitted again
+  useEffect(() => {
+    const on = () =>
+      panes.current.forEach((p) => {
+        p.term.options.fontSize = BASE_FONT * fontScale()
+        safeFit(p)
+      })
+    window.addEventListener(FONT_EVENT, on)
+    return () => window.removeEventListener(FONT_EVENT, on)
+  }, [])
 
   useEffect(() => {
     panes.current.forEach((p) => {

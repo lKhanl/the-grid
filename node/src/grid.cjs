@@ -6,6 +6,7 @@ const { Service } = require('./service.cjs')
 const { stripAnsi } = require('./util.cjs')
 const { createApi } = require('./api.cjs')
 const { createGit } = require('./git.cjs')
+const { createFiles } = require('./files.cjs')
 const { openStore, createWorkspaces, gridDir } = require('./workspaces.cjs')
 const { createStats } = require('./stats.cjs')
 const { createDb } = require('./db.cjs')
@@ -117,6 +118,7 @@ function serve() {
   const mcpServer = new McpServer({ port: PORT, version: VERSION }) // for POST /mcp: the same tools as `grid mcp`, calling this server's own API
 
   const gitApi = createGit({ svcs: () => svcs, generation: () => cfg })
+  const filesApi = createFiles({ svcs: () => svcs }) // Files panel (files.cjs): read-only browsing of the services' folders
 
   // "all", a service name or a group name
   function resolve(target) {
@@ -219,6 +221,7 @@ function serve() {
       }
       if (await configApi.handle(req, res, u, json)) return
       if (await gitApi.handle(req, res, u, json)) return
+      if (await filesApi.handle(req, res, u, json)) return
       if (await workspaces.handle(req, res, u, json)) return
       if (await db.handle(req, res, u, json)) return
       if (p === '/api/terms/shells') return json(shells())

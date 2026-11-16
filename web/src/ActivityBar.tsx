@@ -1,6 +1,6 @@
-import { ChangesIcon, DatabaseIcon, RuntimesIcon, ServicesIcon, SettingsIcon, TerminalIcon } from './icons'
+import { ChangesIcon, FilesIcon, DatabaseIcon, RuntimesIcon, ServicesIcon, SettingsIcon, TerminalIcon } from './icons'
 
-export type Panel = 'services' | 'changes' | 'database' | 'runtimes' | 'settings' | null
+export type Panel = 'services' | 'files' | 'changes' | 'database' | 'runtimes' | 'settings' | null
 
 interface Props {
   panel: Panel
@@ -32,6 +32,14 @@ export function ActivityBar({ panel, setPanel, runningCount, gitTotal, hasDb, db
         <ServicesIcon size={22} />
         <span className="activity-tip">Services</span>
         {runningCount > 0 && <span className="activity-badge">{runningCount}</span>}
+      </button>
+      <button
+        className={`activity ${panel === 'files' ? 'on' : ''}`}
+        aria-label="Files"
+        onClick={toggle('files')}
+      >
+        <FilesIcon size={22} />
+        <span className="activity-tip">Files (read-only browser)</span>
       </button>
       <button
         className={`activity ${panel === 'changes' ? 'on' : ''}`}

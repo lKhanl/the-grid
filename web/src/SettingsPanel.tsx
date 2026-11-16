@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react'
 import { saveSettings, setLogLines, type State } from './api'
-import type { Theme } from './theme'
+import type { FontSize, Theme } from './theme'
 import { formatBytes } from './ui'
 
 export const SHORTCUTS: [string, [string[], string][]][] = [
@@ -39,6 +39,8 @@ interface Props {
   setError: (e: string) => void
   theme: Theme
   setTheme: (t: Theme) => void
+  fontSize: FontSize
+  setFontSize: (f: FontSize) => void
   neon: boolean
   setNeon: Dispatch<SetStateAction<boolean>>
   /** the system asks for less motion (the neon line starts off) */
@@ -46,7 +48,7 @@ interface Props {
 }
 
 /** Settings panel in the sidebar: theme, effects, logs, keyboard shortcuts. */
-export function SettingsPanel({ state, setState, setError, theme, setTheme, neon, setNeon, reducedMotion }: Props) {
+export function SettingsPanel({ state, setState, setError, theme, setTheme, fontSize, setFontSize, neon, setNeon, reducedMotion }: Props) {
   const logLines = state?.logLines ?? 1000
   return (
     <>
@@ -72,6 +74,25 @@ export function SettingsPanel({ state, setState, setError, theme, setTheme, neon
                 </span>
                 <strong>{label}</strong>
                 <small>{help}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+        <section>
+          <h4>Text size</h4>
+          <div className="setting-text">
+            <span>Size of all text</span>
+            <small>Menus, logs, terminals, diffs and files. Larger is about 15% bigger.</small>
+          </div>
+          <div className="seg" role="radiogroup" aria-label="Text size">
+            {(
+              [
+                ['standard', 'Standard'],
+                ['large', 'Larger'],
+              ] as [FontSize, string][]
+            ).map(([id, label]) => (
+              <button key={id} role="radio" aria-checked={fontSize === id} className={fontSize === id ? 'on' : ''} onClick={() => setFontSize(id)}>
+                {label}
               </button>
             ))}
           </div>

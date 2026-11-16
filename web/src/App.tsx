@@ -7,8 +7,9 @@ import { ServiceForm } from './ServiceForm'
 import { RuntimeForm } from './RuntimeForm'
 import { Workspaces } from './Workspaces'
 import { NeonBorder } from './NeonBorder'
-import { applyTheme, loadTheme, type Theme } from './theme'
+import { applyFontSize, applyTheme, loadFontSize, loadTheme, type FontSize, type Theme } from './theme'
 import { ChangesList, DiffPane, useGit } from './Changes'
+import { FilesList, FileViewer, useFiles } from './Files'
 import { DbForm, DbSidebar, DbWorkbench, useDatabase } from './Database'
 import type { DbKind } from './dbApi'
 import { loadPrefs, TermPanel } from './Terminals'
@@ -63,9 +64,10 @@ export default function App() {
     return v === 'on' || (v !== 'off' && !reducedMotion)
   })
   const [theme, setTheme] = useState<Theme>(loadTheme)
+  const [fontSize, setFontSize] = useState<FontSize>(loadFontSize)
   const [panel, setPanel] = useState<Panel>(() => {
     const p = localStorage.getItem('grid.panel')
-    return p === 'runtimes' || p === 'settings' || p === 'changes' || p === 'database' || p === 'services' ? (p as Panel) : 'services'
+    return p === 'runtimes' || p === 'settings' || p === 'changes' || p === 'files' || p === 'database' || p === 'services' ? (p as Panel) : 'services'
   })
   const [sideW, setSideW] = useState(() => {
     const n = Number(localStorage.getItem('grid.sideW'))
@@ -95,6 +97,20 @@ export default function App() {
     el.addEventListener('pointercancel', up)
   }
   const git = useGit(panel === 'changes')
+  const files = useFiles(panel === 'files')
+  // "Open the whole file" from Changes: the git repository may be above the service folder, so find the folder the file lives in
+  const openInFiles = useCallback(
+    (repo: string, path: string) => {
+      const norm = (x: string) => x.replace(/\\/g, '/').replace(/\/$/, '')
+      const abs = norm(repo) + '/' + path
+      const r = files.roots.filter((x) => abs.startsWith(norm(x.root) + '/')).sort((a, b) => b.root.length - a.root.length)[0]
+      if (!r) return false
+      files.setSel({ root: r.root, path: abs.slice(norm(r.root).length + 1) })
+      setPanel('files')
+      return true
+    },
+    [files.roots, files.setSel], // eslint-disable-line react-hooks/exhaustive-deps
+  )
   // The Database panel exists only in builds with -tags db.
   const hasDb = state?.features?.includes('db') ?? false
   // the database drivers compiled in (db:oracle, db:postgres)
@@ -113,6 +129,7 @@ export default function App() {
 
   useEffect(() => localStorage.setItem('grid.neon', neon ? 'on' : 'off'), [neon])
   useEffect(() => applyTheme(theme), [theme])
+  useEffect(() => applyFontSize(fontSize), [fontSize])
 
   // Deep links: #new, #new=group, #edit=service, #select=service, #runtime=new, #runtime=name
   useEffect(() => {
@@ -121,7 +138,7 @@ export default function App() {
       if (h === 'new' || h.startsWith('new=')) setForm({ editing: null, group: h.slice(4) || undefined })
       else if (h.startsWith('new-dir=')) setForm({ editing: null, cwd: h.slice(8) })
       else if (h.startsWith('edit=')) setForm({ editing: h.slice(5) })
-      else if (h === 'runtimes' || h === 'services' || h === 'settings' || h === 'database') setPanel(h as Panel)
+      else if (h === 'runtimes' || h === 'services' || h === 'settings' || h === 'database' || h === 'files') setPanel(h as Panel)
       else if (h === 'terminal') setTermOpen(true)
       else if (h === 'theme=basic' || h === 'theme=basic-light' || h === 'theme=grid') setTheme(h.slice(6) as Theme)
       else if (h.startsWith('select=')) setSelected(h.slice(7))
@@ -337,6 +354,8 @@ export default function App() {
             />
           ) : panel === 'database' ? (
             <DbSidebar dbs={dbs} />
+          ) : panel === 'files' ? (
+            <FilesList files={files} typeIcon={(t) => <TypeIcon type={t} size={15} />} />
           ) : panel === 'changes' ? (
             <ChangesList git={git} typeIcon={(t) => <TypeIcon type={t} size={15} />} />
           ) : panel === 'settings' ? (
@@ -348,6 +367,8 @@ export default function App() {
               setTheme={setTheme}
               neon={neon}
               setNeon={setNeon}
+              fontSize={fontSize}
+              setFontSize={setFontSize}
               reducedMotion={reducedMotion}
             />
           ) : (
@@ -364,11 +385,12 @@ export default function App() {
           title="Drag to resize, double-click to reset"
         />
         <section className={`detail ${term.termOpen ? 'term-open' : ''}`}>
-          {panel === 'changes' && !(term.termOpen && term.termMax) && <DiffPane git={git} />}
+          {panel === 'files' && !(term.termOpen && term.termMax) && <FileViewer files={files} />}
+          {panel === 'changes' && !(term.termOpen && term.termMax) && <DiffPane git={git} onOpenFile={openInFiles} />}
           {panel === 'database' && !(term.termOpen && term.termMax) && <DbWorkbench dbs={dbs} />}
           <div
             className="detail-pane"
-            style={{ display: (term.termOpen && term.termMax) || panel === 'changes' || panel === 'database' || panel === 'runtimes' ? 'none' : 'flex' }}
+            style={{ display: (term.termOpen && term.termMax) || panel === 'files' || panel === 'changes' || panel === 'database' || panel === 'runtimes' ? 'none' : 'flex' }}
           >
             <ServiceHeader
               current={current}
