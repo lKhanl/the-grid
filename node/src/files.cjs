@@ -27,7 +27,9 @@ function createFiles(ctx) {
   const roots = () => {
     const by = new Map()
     for (const v of Object.values(ctx.svcs())) {
-      const s = v.info(), root = path.resolve(s.cwd)
+      const s = v.info()
+      if (String(s.type) === 'jar') continue // a jar service's folder is only where it runs from (usually a build output), not source to browse
+      const root = path.resolve(s.cwd)
       let r = by.get(root)
       if (!r) by.set(root, (r = { root, name: path.basename(root) || root, services: [], types: [] }))
       r.services.push(s.name); r.types.push(String(s.type))

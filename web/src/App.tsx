@@ -462,6 +462,7 @@ export default function App() {
             for (const s of st.services) store.set(s.name, [])
             setState(st)
             setSelected(st.services[0]?.name ?? null)
+            setPanel('services') // the new workspace starts on its services, not on the panel the old one was left on
           }}
         />
       )}
